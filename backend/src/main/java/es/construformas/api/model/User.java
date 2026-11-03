@@ -69,6 +69,14 @@ public class User {
     @Column(nullable = false)
     private boolean active = true;
 
+    /**
+     * Set by an admin password reset (V15): the user must choose a new password on the
+     * next login. Cleared by a successful self-service password change (S4/S10).
+     */
+    @Builder.Default
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword = false;
+
     @Builder.Default
     @Column(nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();

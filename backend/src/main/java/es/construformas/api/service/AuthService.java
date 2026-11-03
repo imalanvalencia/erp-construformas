@@ -9,6 +9,7 @@ import es.construformas.api.repository.RefreshTokenRepository;
 import es.construformas.api.repository.UserRepository;
 import es.construformas.api.security.JwtUtil;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +33,11 @@ public class AuthService {
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new IllegalArgumentException("Invalid credentials");
         }
+        if (!user.isActive()) {
+            // S9: credentials are checked first, so the 403 never leaks account status
+            // to someone who does not already know the password.
+            throw new AccessDeniedException("User is inactive");
+        }
         List<String> roles = user.getRoles().stream()
                 .map(r -> r.getName()).toList();
         if (roles.isEmpty()) {
@@ -47,6 +53,7 @@ public class AuthService {
                 .email(user.getEmail())
                 .roles(roles)
                 .name(user.getName())
+                .mustChangePassword(user.isMustChangePassword())
                 .build();
     }
 
@@ -75,6 +82,7 @@ public class AuthService {
                 .email(user.getEmail())
                 .roles(roles)
                 .name(user.getName())
+                .mustChangePassword(user.isMustChangePassword())
                 .build();
     }
 

@@ -14,6 +14,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import es.construformas.api.security.JwtUtil;
 import es.construformas.api.security.CustomUserDetailsService;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -120,5 +121,21 @@ class AuthControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("S9: POST /api/auth/login with an inactive user should return 403")
+    void loginWithInactiveUserShouldReturnForbidden() throws Exception {
+        LoginRequest request = new LoginRequest();
+        request.setEmail("off@test.com");
+        request.setPassword("password123");
+
+        when(authService.login(any(LoginRequest.class)))
+                .thenThrow(new AccessDeniedException("User is inactive"));
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden());
     }
 }

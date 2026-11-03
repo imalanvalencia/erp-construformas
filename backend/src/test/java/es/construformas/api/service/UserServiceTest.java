@@ -4,9 +4,13 @@ import es.construformas.api.model.Role;
 import es.construformas.api.model.User;
 import es.construformas.api.model.UserAvailability;
 import es.construformas.api.model.UserRole;
+import es.construformas.api.dto.ChangePasswordRequest;
+import es.construformas.api.dto.SessionDTO;
 import es.construformas.api.dto.UserProfileDTO;
 import es.construformas.api.dto.UserProfileUpdateRequest;
 import es.construformas.api.exception.UserNotFoundException;
+import es.construformas.api.model.RefreshToken;
+import es.construformas.api.repository.RefreshTokenRepository;
 import es.construformas.api.repository.RoleRepository;
 import es.construformas.api.repository.UserRepository;
 import org.springframework.security.access.AccessDeniedException;
@@ -20,6 +24,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -36,6 +41,7 @@ class UserServiceTest {
 
     @Mock private UserRepository userRepository;
     @Mock private RoleRepository roleRepository;
+    @Mock private RefreshTokenRepository refreshTokenRepository;
     @Mock private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
     @InjectMocks private UserService userService;
 
@@ -351,5 +357,118 @@ class UserServiceTest {
                 .hasMessage("Phone already exists");
 
         verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("S4: changeMyPassword should reject a wrong current password")
+    void changeMyPasswordShouldRejectWrongCurrentPassword() {
+        authenticateAs("op@test.com");
+        User caller = User.builder().id(7L).email("op@test.com").password("hashed").build();
+        when(userRepository.findWithCurrentProjectByEmail("op@test.com"))
+                .thenReturn(Optional.of(caller));
+        when(passwordEncoder.matches("wrong", "hashed")).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.changeMyPassword(
+                new ChangePasswordRequest("wrong", "new-pass")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Current password is incorrect");
+
+        verify(userRepository, never()).save(any());
+        verify(refreshTokenRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("S4: changeMyPassword should encode, clear the flag and revoke sessions")
+    void changeMyPasswordShouldEncodeAndRevokeSessions() {
+        authenticateAs("op@test.com");
+        User caller = User.builder().id(7L).email("op@test.com").password("hashed")
+                .mustChangePassword(true).build();
+        RefreshToken kept = RefreshToken.builder().id("a").user(caller).token("tok-a")
+                .expiry(LocalDateTime.now().plusDays(7)).revoked(false).build();
+        RefreshToken other = RefreshToken.builder().id("b").user(caller).token("tok-b")
+                .expiry(LocalDateTime.now().plusDays(7)).revoked(false).build();
+        when(userRepository.findWithCurrentProjectByEmail("op@test.com"))
+                .thenReturn(Optional.of(caller));
+        when(passwordEncoder.matches("current", "hashed")).thenReturn(true);
+        when(passwordEncoder.encode("new-pass")).thenReturn("new-hash");
+        when(refreshTokenRepository.findByUserIdAndRevokedFalse(7L))
+                .thenReturn(List.of(kept, other));
+        when(refreshTokenRepository.save(any(RefreshToken.class)))
+                .thenAnswer(i -> i.getArgument(0));
+
+        userService.changeMyPassword(new ChangePasswordRequest("current", "new-pass"));
+
+        assertThat(caller.getPassword()).isEqualTo("new-hash");
+        assertThat(caller.isMustChangePassword()).isFalse();
+        assertThat(kept.isRevoked()).isTrue();
+        assertThat(other.isRevoked()).isTrue();
+        verify(userRepository).save(caller);
+        verify(refreshTokenRepository).save(kept);
+        verify(refreshTokenRepository).save(other);
+    }
+
+    @Test
+    @DisplayName("S8: listSessions should return only live tokens, without the token value")
+    void listSessionsShouldReturnActiveTokensOnly() {
+        authenticateAs("op@test.com");
+        User caller = User.builder().id(7L).email("op@test.com").build();
+        RefreshToken live = RefreshToken.builder().id("live").user(caller).token("secret-live")
+                .createdAt(LocalDateTime.of(2026, 1, 1, 10, 0))
+                .expiry(LocalDateTime.now().plusDays(7)).revoked(false).build();
+        RefreshToken stale = RefreshToken.builder().id("stale").user(caller).token("secret-stale")
+                .expiry(LocalDateTime.now().minusDays(1)).revoked(false).build();
+        when(userRepository.findWithCurrentProjectByEmail("op@test.com"))
+                .thenReturn(Optional.of(caller));
+        when(refreshTokenRepository.findByUserIdAndRevokedFalse(7L))
+                .thenReturn(List.of(live, stale));
+
+        List<SessionDTO> sessions = userService.listSessions();
+
+        assertThat(sessions).hasSize(1);
+        assertThat(sessions.get(0).getId()).isEqualTo("live");
+        assertThat(sessions.get(0).getCreatedAt())
+                .isEqualTo(LocalDateTime.of(2026, 1, 1, 10, 0));
+        assertThat(sessions.get(0).getExpiry()).isAfter(LocalDateTime.now());
+    }
+
+    @Test
+    @DisplayName("S8: closeOtherSessions should revoke every token but the current one")
+    void closeOtherSessionsShouldKeepTheCurrentOne() {
+        authenticateAs("op@test.com");
+        User caller = User.builder().id(7L).email("op@test.com").build();
+        RefreshToken current = RefreshToken.builder().id("keep").user(caller).token("keep-me")
+                .expiry(LocalDateTime.now().plusDays(7)).revoked(false).build();
+        RefreshToken other = RefreshToken.builder().id("kill").user(caller).token("kill-me")
+                .expiry(LocalDateTime.now().plusDays(7)).revoked(false).build();
+        when(userRepository.findWithCurrentProjectByEmail("op@test.com"))
+                .thenReturn(Optional.of(caller));
+        when(refreshTokenRepository.findByUserId(7L)).thenReturn(List.of(current, other));
+        when(refreshTokenRepository.save(any(RefreshToken.class)))
+                .thenAnswer(i -> i.getArgument(0));
+
+        userService.closeOtherSessions("keep-me");
+
+        assertThat(current.isRevoked()).isFalse();
+        assertThat(other.isRevoked()).isTrue();
+        verify(refreshTokenRepository).save(other);
+        verify(refreshTokenRepository, never()).save(current);
+    }
+
+    @Test
+    @DisplayName("S8: closeOtherSessions should reject a token that is not the caller's")
+    void closeOtherSessionsShouldRejectForeignToken() {
+        authenticateAs("op@test.com");
+        User caller = User.builder().id(7L).email("op@test.com").build();
+        RefreshToken current = RefreshToken.builder().id("keep").user(caller).token("keep-me")
+                .expiry(LocalDateTime.now().plusDays(7)).revoked(false).build();
+        when(userRepository.findWithCurrentProjectByEmail("op@test.com"))
+                .thenReturn(Optional.of(caller));
+        when(refreshTokenRepository.findByUserId(7L)).thenReturn(List.of(current));
+
+        assertThatThrownBy(() -> userService.closeOtherSessions("alien-token"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Refresh token not found");
+
+        verify(refreshTokenRepository, never()).save(any());
     }
 }

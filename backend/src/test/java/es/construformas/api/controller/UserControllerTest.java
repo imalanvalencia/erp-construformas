@@ -3,6 +3,9 @@ package es.construformas.api.controller;
 import es.construformas.api.model.User;
 import es.construformas.api.model.UserAvailability;
 import es.construformas.api.model.UserRole;
+import es.construformas.api.model.Role;
+import es.construformas.api.dto.UserProfileDTO;
+import es.construformas.api.dto.UserProfileUpdateRequest;
 import es.construformas.api.exception.UserNotFoundException;
 import es.construformas.api.service.UserService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,7 +22,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -57,6 +62,20 @@ class UserControllerTest {
                 .password("raw-secret")
                 .role(UserRole.OPERATOR)
                 .active(true)
+                .build();
+    }
+
+    private UserProfileDTO sampleProfile() {
+        return UserProfileDTO.builder()
+                .id(1L)
+                .name("John Doe")
+                .email("john@test.com")
+                .phone("555-1234")
+                .nie("X123")
+                .roles(Set.of(Role.builder().id(1L).name("ADMIN").build()))
+                .availability(UserAvailability.AVAILABLE)
+                .active(true)
+                .createdAt(LocalDateTime.of(2026, 1, 1, 0, 0))
                 .build();
     }
 
@@ -205,5 +224,34 @@ class UserControllerTest {
                         .content("\"UNAVAILABLE\""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").value("UNAVAILABLE"));
+    }
+
+    @Test
+    @DisplayName("S2: GET /api/users/me should return the caller profile without the password")
+    void getProfileShouldNotLeakPassword() throws Exception {
+        when(userService.getProfile()).thenReturn(sampleProfile());
+
+        mockMvc.perform(get("/api/users/me"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.password").doesNotExist())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.name").value("John Doe"))
+                .andExpect(jsonPath("$.email").value("john@test.com"))
+                .andExpect(jsonPath("$.availability").value("AVAILABLE"))
+                .andExpect(jsonPath("$.roles[0].name").value("ADMIN"));
+    }
+
+    @Test
+    @DisplayName("S3: PUT /api/users/me should apply phone and nie")
+    void updateProfileShouldApplyContactFields() throws Exception {
+        when(userService.updateProfile(any(UserProfileUpdateRequest.class)))
+                .thenReturn(sampleProfile());
+
+        mockMvc.perform(put("/api/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"555-1234\",\"nie\":\"X123\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.phone").value("555-1234"))
+                .andExpect(jsonPath("$.nie").value("X123"));
     }
 }

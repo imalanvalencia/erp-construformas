@@ -46,6 +46,17 @@ public class ClockEntryController {
                         .toList());
     }
 
+    @GetMapping("/me")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    public ResponseEntity<List<ClockEntryDTO>> getMine(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end) {
+        return ResponseEntity.ok(
+                clockEntryService.findByCallerAndDateRange(start, end).stream()
+                        .map(ClockEntryMapper::toDto)
+                        .toList());
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     public ResponseEntity<Void> delete(@PathVariable Long id) {

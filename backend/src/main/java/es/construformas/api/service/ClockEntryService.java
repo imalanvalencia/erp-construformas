@@ -1,8 +1,10 @@
 package es.construformas.api.service;
 
 import es.construformas.api.model.ClockEntry;
+import es.construformas.api.model.ClockType;
 import es.construformas.api.model.Project;
 import es.construformas.api.model.User;
+import es.construformas.api.model.UserAvailability;
 import es.construformas.api.repository.ClockEntryRepository;
 import es.construformas.api.repository.ProjectRepository;
 import es.construformas.api.repository.UserRepository;
@@ -42,7 +44,25 @@ public class ClockEntryService {
         entry.setProject(project);
         if (entry.getTimestamp() == null) entry.setTimestamp(LocalDateTime.now());
 
+        applyAutomaticAvailability(user, entry.getClockType());
+
         return clockEntryRepository.save(entry);
+    }
+
+    /**
+     * S5: availability is derived from clock events and is never set by hand — an ENTRY
+     * means the user is on site, an EXIT means it is available again. Only a real change
+     * is written, so an unchanged availability costs no extra UPDATE.
+     */
+    private void applyAutomaticAvailability(User user, ClockType clockType) {
+        UserAvailability target = switch (clockType) {
+            case ENTRY -> UserAvailability.ON_SITE;
+            case EXIT -> UserAvailability.AVAILABLE;
+        };
+        if (user.getAvailability() != target) {
+            user.setAvailability(target);
+            userRepository.save(user);
+        }
     }
 
     public ClockEntry findById(Long id) {

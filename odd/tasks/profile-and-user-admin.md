@@ -137,9 +137,14 @@ Both full suites pass (`cd backend && ./mvnw test`, `cd frontend && ng test`) an
       (`registerEntryShouldSetOnSite`, `registerExitShouldSetAvailable`,
       `shouldApplyEmailAndRolesButIgnoreAvailabilityOnUpdate`), GREEN: full suite
       `Tests run: 294, Failures: 0, Errors: 0`. Route: inline (small).
-- [ ] T4 — Backend admin (S9, S10, S11, S12): `PATCH /{id}/active`,
+- [x] T4 — Backend admin (S9, S10, S11, S12): `PATCH /{id}/active`,
       `POST /{id}/password-reset`, `PUT /{id}/current-project`, delete guards, fix the
       `update()` primitive `active` bug + RED/GREEN tests.
+      Commits `9fdc3c2` (S9+S10+S11+S6 actions, 640 lines, 316 green) and `f9d0fa5`
+      (S12 delete guards, 350 lines). RED observed: compile failure
+      `cannot find symbol: class UserUpdateRequest`, then GREEN full suite
+      `Tests run: 328, Failures: 0, Errors: 0` (baseline 294 → +34). Route: inline
+      (small, split into 2 reviewable slices).
 - [ ] T5 — Frontend `/profile` (S1, S2, S3, S4, S6, S7, S8, S13): page + `ProfileService`
       + header link + tests.
 - [ ] T6 — Frontend admin module (S9, S10, S11, S12): active toggle, reset-password modal,
@@ -187,3 +192,12 @@ Both full suites pass (`cd backend && ./mvnw test`, `cd frontend && ng test`) an
   the admin REST override `PUT /api/users/{id}/availability` stays for now and the UI
   select disappears in T6. If the endpoint should die too, that is a one-line follow-up —
   flagged rather than silently decided.
+- 2026-11-05 — T4 committed as `9fdc3c2` (S9 activation guards, S10 password reset,
+  S11 current-project assignment, S6 self-service switch, plus the `update()` boxed-Boolean
+  fix) and `f9d0fa5` (S12 delete guards), 990 authored lines total across the two slices.
+  RED observed: compile failure `cannot find symbol: class UserUpdateRequest`; GREEN full
+  suite 328 tests green. `hasHistory()` covers all 15 non-cascading `users(id)` foreign
+  keys and is proven against the H2 schema by `UserAdminIntegrationTest`. Scratch-backup
+  lesson: a `/tmp` copy was wiped by the overnight cleaner mid-task — slice 1 was safe in
+  its commit, and the slice-2 delta was reconstructed; future scratch backups stay inside
+  the workspace (git-excluded), never `/tmp`.

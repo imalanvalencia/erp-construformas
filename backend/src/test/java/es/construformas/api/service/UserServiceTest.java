@@ -273,9 +273,20 @@ class UserServiceTest {
     }
 
     @Test
-    @DisplayName("Delete should delegate to repository")
+    @DisplayName("S12: Delete should remove a user that has no history")
     void shouldDeleteUser() {
+        authenticateAs("admin@test.com");
+        User caller = User.builder().id(9L).email("admin@test.com")
+                .roles(Set.of(Role.builder().id(1L).name("ADMIN").build())).build();
+        User target = User.builder().id(1L).active(true)
+                .roles(Set.of(Role.builder().id(2L).name("OPERATOR").build())).build();
+
+        when(userRepository.findByEmail("admin@test.com")).thenReturn(Optional.of(caller));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(target));
+        when(userRepository.hasHistory(1L)).thenReturn(false);
+
         userService.delete(1L);
+
         verify(userRepository).deleteById(1L);
     }
 
@@ -687,5 +698,85 @@ class UserServiceTest {
                 .hasMessageContaining("not assigned");
 
         verify(userRepository, never()).save(any());
+    }
+
+    // -------------------------------------------------------------- S12: delete guards
+
+    @Test
+    @DisplayName("S12: delete should refuse the caller's own account")
+    void deleteShouldRefuseSelfDeletion() {
+        authenticateAs("admin@test.com");
+        User caller = User.builder().id(9L).email("admin@test.com")
+                .roles(Set.of(Role.builder().id(1L).name("ADMIN").build())).build();
+
+        when(userRepository.findByEmail("admin@test.com")).thenReturn(Optional.of(caller));
+        when(userRepository.findById(9L)).thenReturn(Optional.of(caller));
+
+        assertThatThrownBy(() -> userService.delete(9L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("your own account");
+
+        verify(userRepository, never()).deleteById(any());
+        verify(userRepository, never()).hasHistory(any());
+    }
+
+    @Test
+    @DisplayName("S12: delete should refuse the last active administrator")
+    void deleteShouldRefuseLastActiveAdmin() {
+        authenticateAs("root@test.com");
+        User caller = User.builder().id(9L).email("root@test.com")
+                .roles(Set.of(Role.builder().id(1L).name("ADMIN").build())).build();
+        User target = User.builder().id(2L).active(true)
+                .roles(Set.of(Role.builder().id(1L).name("ADMIN").build())).build();
+
+        when(userRepository.findByEmail("root@test.com")).thenReturn(Optional.of(caller));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(target));
+        when(userRepository.countActiveAdmins()).thenReturn(1L);
+
+        assertThatThrownBy(() -> userService.delete(2L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("last active administrator");
+
+        verify(userRepository, never()).deleteById(any());
+        verify(userRepository, never()).hasHistory(any());
+    }
+
+    @Test
+    @DisplayName("S12: delete should let a second active administrator remove the first")
+    void deleteShouldAllowASecondActiveAdministrator() {
+        authenticateAs("root@test.com");
+        User caller = User.builder().id(9L).email("root@test.com")
+                .roles(Set.of(Role.builder().id(1L).name("ADMIN").build())).build();
+        User target = User.builder().id(2L).active(true)
+                .roles(Set.of(Role.builder().id(1L).name("ADMIN").build())).build();
+
+        when(userRepository.findByEmail("root@test.com")).thenReturn(Optional.of(caller));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(target));
+        when(userRepository.countActiveAdmins()).thenReturn(2L);
+        when(userRepository.hasHistory(2L)).thenReturn(false);
+
+        userService.delete(2L);
+
+        verify(userRepository).deleteById(2L);
+    }
+
+    @Test
+    @DisplayName("S12: delete should point a user with history at deactivation")
+    void deleteShouldRefuseAUserWithHistory() {
+        authenticateAs("root@test.com");
+        User caller = User.builder().id(9L).email("root@test.com")
+                .roles(Set.of(Role.builder().id(1L).name("ADMIN").build())).build();
+        User target = User.builder().id(3L).active(true)
+                .roles(Set.of(Role.builder().id(2L).name("OPERATOR").build())).build();
+
+        when(userRepository.findByEmail("root@test.com")).thenReturn(Optional.of(caller));
+        when(userRepository.findById(3L)).thenReturn(Optional.of(target));
+        when(userRepository.hasHistory(3L)).thenReturn(true);
+
+        assertThatThrownBy(() -> userService.delete(3L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("deactivate");
+
+        verify(userRepository, never()).deleteById(any());
     }
 }

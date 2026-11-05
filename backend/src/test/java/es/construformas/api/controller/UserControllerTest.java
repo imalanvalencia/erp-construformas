@@ -8,6 +8,7 @@ import es.construformas.api.dto.ChangePasswordRequest;
 import es.construformas.api.dto.SessionDTO;
 import es.construformas.api.dto.UserProfileDTO;
 import es.construformas.api.dto.UserProfileUpdateRequest;
+import es.construformas.api.dto.UserUpdateRequest;
 import es.construformas.api.exception.UserNotFoundException;
 import es.construformas.api.service.UserService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,6 +21,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import es.construformas.api.security.JwtUtil;
 import es.construformas.api.security.CustomUserDetailsService;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -32,6 +34,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -119,11 +122,11 @@ class UserControllerTest {
     @Test
     @DisplayName("S1: PUT /api/users/{id} should never return the password field")
     void updateShouldNotLeakPassword() throws Exception {
-        when(userService.update(eq(1L), any(User.class))).thenReturn(sampleUser());
+        when(userService.update(eq(1L), any(UserUpdateRequest.class))).thenReturn(sampleUser());
 
         mockMvc.perform(put("/api/users/1")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(sampleUser())))
+                        .content("{\"name\":\"John Doe\",\"email\":\"john@test.com\",\"active\":true}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.password").doesNotExist());
     }
@@ -189,13 +192,27 @@ class UserControllerTest {
     @DisplayName("PUT /api/users/{id} should update user")
     void updateUserShouldReturnUpdated() throws Exception {
         User updated = User.builder().name("Jane Doe").phone("555-1234").active(true).build();
-        when(userService.update(eq(1L), any(User.class))).thenReturn(updated);
+        when(userService.update(eq(1L), any(UserUpdateRequest.class))).thenReturn(updated);
 
         mockMvc.perform(put("/api/users/1")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(updated)))
+                        .content("{\"name\":\"Jane Doe\",\"phone\":\"555-1234\",\"active\":true}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value("Jane Doe"));
+    }
+
+    @Test
+    @DisplayName("S5: PUT /api/users/{id} still accepts a body carrying legacy fields")
+    void updateShouldTolerateLegacyBodyFields() throws Exception {
+        when(userService.update(eq(1L), any(UserUpdateRequest.class))).thenReturn(sampleUser());
+
+        mockMvc.perform(put("/api/users/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"John Doe\",\"email\":\"john@test.com\","
+                                + "\"availability\":\"ON_SITE\",\"currentProjectId\":5,"
+                                + "\"createdAt\":\"2026-01-01T00:00:00\",\"active\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.password").doesNotExist());
     }
 
     @Test
@@ -313,5 +330,123 @@ class UserControllerTest {
                 .andExpect(status().isNoContent());
 
         verify(userService).closeOtherSessions("current-refresh");
+    }
+
+    // ------------------------------------------------------- S9: activate / deactivate
+
+    @Test
+    @DisplayName("S9: PATCH /api/users/{id}/active should return the updated user")
+    void setActiveShouldReturnUser() throws Exception {
+        when(userService.setActive(1L, false)).thenReturn(sampleUser());
+
+        mockMvc.perform(patch("/api/users/1/active")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"active\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.password").doesNotExist());
+
+        verify(userService).setActive(1L, false);
+    }
+
+    @Test
+    @DisplayName("S9: PATCH /api/users/{id}/active should return 409 when a guard refuses")
+    void setActiveShouldReturn409OnGuard() throws Exception {
+        when(userService.setActive(1L, false))
+                .thenThrow(new IllegalStateException("You cannot deactivate your own account"));
+
+        mockMvc.perform(patch("/api/users/1/active")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"active\":false}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("You cannot deactivate your own account"));
+    }
+
+    @Test
+    @DisplayName("S9: PATCH /api/users/{id}/active should return 400 when the flag is missing")
+    void setActiveShouldReturn400WithoutFlag() throws Exception {
+        mockMvc.perform(patch("/api/users/1/active")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+
+        verify(userService, never()).setActive(any(), any(Boolean.class));
+    }
+
+    // -------------------------------------------------------------- S10: password reset
+
+    @Test
+    @DisplayName("S10: POST /api/users/{id}/password-reset should return the password once")
+    void passwordResetShouldReturnTheTemporaryPassword() throws Exception {
+        when(userService.resetPassword(1L)).thenReturn("Temp-2026-xkcd");
+
+        mockMvc.perform(post("/api/users/1/password-reset"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.temporaryPassword").value("Temp-2026-xkcd"));
+    }
+
+    @Test
+    @DisplayName("S10: POST /api/users/{id}/password-reset should return 404 for an unknown user")
+    void passwordResetShouldReturn404ForUnknownUser() throws Exception {
+        when(userService.resetPassword(99L)).thenThrow(new UserNotFoundException(99L));
+
+        mockMvc.perform(post("/api/users/99/password-reset"))
+                .andExpect(status().isNotFound());
+    }
+
+    // ------------------------------------------------------ S11 / S6: current project
+
+    @Test
+    @DisplayName("S11: PUT /api/users/{id}/current-project should return the updated user")
+    void setCurrentProjectShouldReturnUser() throws Exception {
+        User assigned = User.builder().id(1L).name("John Doe").active(true).build();
+        when(userService.setCurrentProject(1L, 7L)).thenReturn(assigned);
+
+        mockMvc.perform(put("/api/users/1/current-project")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"projectId\":7}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.password").doesNotExist());
+
+        verify(userService).setCurrentProject(1L, 7L);
+    }
+
+    @Test
+    @DisplayName("S11: PUT /api/users/{id}/current-project should return 400 for an unknown project")
+    void setCurrentProjectShouldReturn400ForUnknownProject() throws Exception {
+        when(userService.setCurrentProject(1L, 404L))
+                .thenThrow(new IllegalArgumentException("Project not found: 404"));
+
+        mockMvc.perform(put("/api/users/1/current-project")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"projectId\":404}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Project not found: 404"));
+    }
+
+    @Test
+    @DisplayName("S6: PUT /api/users/me/current-project should return the refreshed profile")
+    void switchMyCurrentProjectShouldReturnProfile() throws Exception {
+        when(userService.switchMyCurrentProject(5L)).thenReturn(sampleProfile());
+
+        mockMvc.perform(put("/api/users/me/current-project")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"projectId\":5}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.password").doesNotExist())
+                .andExpect(jsonPath("$.id").value(1));
+
+        verify(userService).switchMyCurrentProject(5L);
+    }
+
+    @Test
+    @DisplayName("S6: PUT /api/users/me/current-project should return 403 when not assigned")
+    void switchMyCurrentProjectShouldReturn403WhenNotAssigned() throws Exception {
+        when(userService.switchMyCurrentProject(5L))
+                .thenThrow(new AccessDeniedException("You are not assigned to this project"));
+
+        mockMvc.perform(put("/api/users/me/current-project")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"projectId\":5}"))
+                .andExpect(status().isForbidden());
     }
 }

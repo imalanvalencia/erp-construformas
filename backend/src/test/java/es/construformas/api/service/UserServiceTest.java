@@ -8,8 +8,11 @@ import es.construformas.api.dto.ChangePasswordRequest;
 import es.construformas.api.dto.SessionDTO;
 import es.construformas.api.dto.UserProfileDTO;
 import es.construformas.api.dto.UserProfileUpdateRequest;
+import es.construformas.api.dto.UserUpdateRequest;
 import es.construformas.api.exception.UserNotFoundException;
+import es.construformas.api.model.Project;
 import es.construformas.api.model.RefreshToken;
+import es.construformas.api.repository.ProjectRepository;
 import es.construformas.api.repository.RefreshTokenRepository;
 import es.construformas.api.repository.RoleRepository;
 import es.construformas.api.repository.UserRepository;
@@ -42,6 +45,7 @@ class UserServiceTest {
     @Mock private UserRepository userRepository;
     @Mock private RoleRepository roleRepository;
     @Mock private RefreshTokenRepository refreshTokenRepository;
+    @Mock private ProjectRepository projectRepository;
     @Mock private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
     @InjectMocks private UserService userService;
 
@@ -172,7 +176,8 @@ class UserServiceTest {
     @DisplayName("Update should merge non-null fields and save")
     void shouldUpdateUser() {
         User existing = User.builder().id(1L).name("Old").phone("111").nie("A").active(true).build();
-        User updated = User.builder().name("New").phone("222").nie("B").active(false).build();
+        UserUpdateRequest updated = UserUpdateRequest.builder()
+                .name("New").phone("222").nie("B").build();
 
         when(userRepository.findById(1L)).thenReturn(Optional.of(existing));
         when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
@@ -182,7 +187,6 @@ class UserServiceTest {
         assertThat(result.getName()).isEqualTo("New");
         assertThat(result.getPhone()).isEqualTo("222");
         assertThat(result.getNie()).isEqualTo("B");
-        assertThat(result.isActive()).isFalse();
     }
 
     @Test
@@ -193,9 +197,11 @@ class UserServiceTest {
         User existing = User.builder().id(1L).name("Old").email("old@test.com")
                 .password("encoded").roles(Set.of(operator))
                 .availability(UserAvailability.AVAILABLE).active(true).build();
-        User updated = User.builder().name("New").email("new@test.com")
+        UserUpdateRequest updated = UserUpdateRequest.builder()
+                .name("New").email("new@test.com")
                 .roles(Set.of(admin, operator))
-                .availability(UserAvailability.ON_SITE).active(true).build();
+                .availability(UserAvailability.ON_SITE)
+                .active(true).build();
 
         when(userRepository.findById(1L)).thenReturn(Optional.of(existing));
         when(userRepository.existsByEmail("new@test.com")).thenReturn(false);
@@ -213,7 +219,7 @@ class UserServiceTest {
     @DisplayName("S2: Update to an email owned by another user should be rejected")
     void shouldRejectDuplicateEmailOnUpdate() {
         User existing = User.builder().id(1L).name("Old").email("old@test.com").active(true).build();
-        User updated = User.builder().email("taken@test.com").active(true).build();
+        UserUpdateRequest updated = UserUpdateRequest.builder().email("taken@test.com").build();
 
         when(userRepository.findById(1L)).thenReturn(Optional.of(existing));
         when(userRepository.existsByEmail("taken@test.com")).thenReturn(true);
@@ -470,5 +476,216 @@ class UserServiceTest {
                 .hasMessage("Refresh token not found");
 
         verify(refreshTokenRepository, never()).save(any());
+    }
+
+    // ------------------------------------------------------------------ S9: active
+
+    @Test
+    @DisplayName("S9: update should keep the current active value when the field is omitted")
+    void updateShouldKeepActiveWhenOmitted() {
+        User existing = User.builder().id(1L).name("Old").active(true).build();
+        UserUpdateRequest request = UserUpdateRequest.builder().name("New").build();
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        User result = userService.update(1L, request);
+
+        assertThat(result.getName()).isEqualTo("New");
+        assertThat(result.isActive()).isTrue();
+    }
+
+    @Test
+    @DisplayName("S9: update should route an explicit active change through the guards")
+    void updateShouldApplyActiveWhenSent() {
+        authenticateAs("admin@test.com");
+        User caller = User.builder().id(9L).email("admin@test.com")
+                .roles(Set.of(Role.builder().id(1L).name("ADMIN").build())).build();
+        User existing = User.builder().id(1L).name("Old").active(true)
+                .roles(Set.of(Role.builder().id(2L).name("OPERATOR").build())).build();
+        UserUpdateRequest request = UserUpdateRequest.builder().active(false).build();
+
+        when(userRepository.findByEmail("admin@test.com")).thenReturn(Optional.of(caller));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        assertThat(userService.update(1L, request).isActive()).isFalse();
+    }
+
+    @Test
+    @DisplayName("S9: setActive should activate an inactive user without consulting the guards")
+    void setActiveShouldActivate() {
+        User target = User.builder().id(1L).active(false).build();
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(target));
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        assertThat(userService.setActive(1L, true).isActive()).isTrue();
+
+        verify(userRepository, never()).countActiveAdmins();
+        verify(userRepository, never()).findByEmail(any());
+    }
+
+    @Test
+    @DisplayName("S9: setActive should refuse deactivating yourself")
+    void setActiveShouldRefuseSelfDeactivation() {
+        authenticateAs("admin@test.com");
+        User caller = User.builder().id(9L).email("admin@test.com")
+                .roles(Set.of(Role.builder().id(1L).name("ADMIN").build())).build();
+
+        when(userRepository.findByEmail("admin@test.com")).thenReturn(Optional.of(caller));
+        when(userRepository.findById(9L)).thenReturn(Optional.of(caller));
+
+        assertThatThrownBy(() -> userService.setActive(9L, false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("your own account");
+
+        verify(userRepository, never()).save(any());
+        verify(userRepository, never()).countActiveAdmins();
+    }
+
+    @Test
+    @DisplayName("S9: setActive should refuse leaving the system without an active ADMIN")
+    void setActiveShouldRefuseLastActiveAdmin() {
+        authenticateAs("root@test.com");
+        User caller = User.builder().id(9L).email("root@test.com")
+                .roles(Set.of(Role.builder().id(1L).name("ADMIN").build())).build();
+        User target = User.builder().id(2L).active(true)
+                .roles(Set.of(Role.builder().id(1L).name("ADMIN").build())).build();
+
+        when(userRepository.findByEmail("root@test.com")).thenReturn(Optional.of(caller));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(target));
+        when(userRepository.countActiveAdmins()).thenReturn(1L);
+
+        assertThatThrownBy(() -> userService.setActive(2L, false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("last active administrator");
+
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("S9: setActive should deactivate an operator when another admin asks")
+    void setActiveShouldDeactivateAnOperator() {
+        authenticateAs("root@test.com");
+        User caller = User.builder().id(9L).email("root@test.com")
+                .roles(Set.of(Role.builder().id(1L).name("ADMIN").build())).build();
+        User target = User.builder().id(3L).active(true)
+                .roles(Set.of(Role.builder().id(2L).name("OPERATOR").build())).build();
+
+        when(userRepository.findByEmail("root@test.com")).thenReturn(Optional.of(caller));
+        when(userRepository.findById(3L)).thenReturn(Optional.of(target));
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        assertThat(userService.setActive(3L, false).isActive()).isFalse();
+
+        verify(userRepository, never()).countActiveAdmins();
+    }
+
+    // -------------------------------------------------------------- S10: reset
+
+    @Test
+    @DisplayName("S10: resetPassword should hash the returned password, set the flag and revoke sessions")
+    void resetPasswordShouldHashSetFlagAndRevokeSessions() {
+        User target = User.builder().id(4L).email("op@test.com").password("old-hash")
+                .mustChangePassword(false).build();
+        RefreshToken live = RefreshToken.builder().id("t1").user(target).token("tok-1")
+                .expiry(LocalDateTime.now().plusDays(7)).revoked(false).build();
+
+        when(userRepository.findById(4L)).thenReturn(Optional.of(target));
+        when(passwordEncoder.encode(any(String.class))).thenReturn("new-hash");
+        when(refreshTokenRepository.findByUserIdAndRevokedFalse(4L)).thenReturn(List.of(live));
+        when(refreshTokenRepository.save(any(RefreshToken.class))).thenAnswer(i -> i.getArgument(0));
+
+        String temporaryPassword = userService.resetPassword(4L);
+
+        assertThat(temporaryPassword).hasSizeGreaterThanOrEqualTo(8);
+        verify(passwordEncoder).encode(temporaryPassword);
+        assertThat(target.getPassword()).isEqualTo("new-hash");
+        assertThat(target.isMustChangePassword()).isTrue();
+        assertThat(live.isRevoked()).isTrue();
+        verify(userRepository).save(target);
+    }
+
+    @Test
+    @DisplayName("S10: resetPassword should reject an unknown user")
+    void resetPasswordShouldRejectUnknownUser() {
+        when(userRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.resetPassword(99L))
+                .isInstanceOf(UserNotFoundException.class);
+
+        verify(userRepository, never()).save(any());
+    }
+
+    // -------------------------------------------------------- S11 / S6: current project
+
+    @Test
+    @DisplayName("S11: setCurrentProject should persist the chosen project for any user")
+    void setCurrentProjectShouldPersistTheProject() {
+        User target = User.builder().id(1L).active(true).build();
+        Project project = Project.builder().id(7L).name("Obra 7").build();
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(target));
+        when(projectRepository.findById(7L)).thenReturn(Optional.of(project));
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        User result = userService.setCurrentProject(1L, 7L);
+
+        assertThat(result.getCurrentProject()).isSameAs(project);
+        verify(userRepository).save(target);
+    }
+
+    @Test
+    @DisplayName("S11: setCurrentProject should reject an unknown project")
+    void setCurrentProjectShouldRejectUnknownProject() {
+        User target = User.builder().id(1L).active(true).build();
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(target));
+        when(projectRepository.findById(404L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.setCurrentProject(1L, 404L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Project not found");
+
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("S6: switchMyCurrentProject should accept a project the operator is assigned to")
+    void switchMyCurrentProjectShouldAcceptAssignedProject() {
+        authenticateAs("op@test.com");
+        User caller = User.builder().id(7L).email("op@test.com")
+                .roles(Set.of(Role.builder().id(2L).name("OPERATOR").build())).build();
+        Project project = Project.builder().id(5L).name("Obra 5").build();
+
+        when(userRepository.findWithCurrentProjectByEmail("op@test.com")).thenReturn(Optional.of(caller));
+        when(projectRepository.findById(5L)).thenReturn(Optional.of(project));
+        when(projectRepository.existsByProjectIdAndOperatorId(5L, 7L)).thenReturn(true);
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        UserProfileDTO profile = userService.switchMyCurrentProject(5L);
+
+        assertThat(profile.getCurrentProjectId()).isEqualTo(5L);
+        assertThat(profile.getCurrentProjectName()).isEqualTo("Obra 5");
+        verify(userRepository).save(caller);
+    }
+
+    @Test
+    @DisplayName("S6: switchMyCurrentProject should reject a project the operator is not assigned to")
+    void switchMyCurrentProjectShouldRejectUnassignedProject() {
+        authenticateAs("op@test.com");
+        User caller = User.builder().id(7L).email("op@test.com").build();
+        Project project = Project.builder().id(5L).name("Obra 5").build();
+
+        when(userRepository.findWithCurrentProjectByEmail("op@test.com")).thenReturn(Optional.of(caller));
+        when(projectRepository.findById(5L)).thenReturn(Optional.of(project));
+        when(projectRepository.existsByProjectIdAndOperatorId(5L, 7L)).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.switchMyCurrentProject(5L))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("not assigned");
+
+        verify(userRepository, never()).save(any());
     }
 }

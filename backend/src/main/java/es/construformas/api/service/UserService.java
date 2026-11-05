@@ -5,12 +5,14 @@ import es.construformas.api.dto.ChangePasswordRequest;
 import es.construformas.api.dto.SessionDTO;
 import es.construformas.api.dto.UserProfileDTO;
 import es.construformas.api.dto.UserProfileUpdateRequest;
+import es.construformas.api.dto.UserUpdateRequest;
 import es.construformas.api.model.Project;
 import es.construformas.api.model.RefreshToken;
 import es.construformas.api.model.Role;
 import es.construformas.api.model.User;
 import es.construformas.api.model.UserAvailability;
 import es.construformas.api.model.UserRole;
+import es.construformas.api.repository.ProjectRepository;
 import es.construformas.api.repository.RefreshTokenRepository;
 import es.construformas.api.repository.RoleRepository;
 import es.construformas.api.repository.UserRepository;
@@ -21,6 +23,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
@@ -34,7 +37,14 @@ public class UserService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final ProjectRepository projectRepository;
     private final PasswordEncoder passwordEncoder;
+
+    /** Unambiguous alphabet: no 0/O, 1/l/I, so a temp password can be read aloud. */
+    private static final String TEMP_PASSWORD_ALPHABET =
+            "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+    private static final int TEMP_PASSWORD_LENGTH = 12;
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     public User create(User user) {
         if (userRepository.existsByEmail(user.getEmail())) {
@@ -81,7 +91,13 @@ public class UserService {
         return userRepository.findByRole(role);
     }
 
-    public User update(Long id, User updated) {
+    /**
+     * Admin edit (S9). The payload carries a boxed {@link Boolean} so an omitted
+     * {@code active} keeps the stored flag instead of silently deactivating the user;
+     * an explicit change runs through the same guards as {@link #setActive}.
+     * Availability is never read here (S5): it is derived from clock events alone.
+     */
+    public User update(Long id, UserUpdateRequest updated) {
         User existing = findById(id);
 
         String newEmail = updated.getEmail();
@@ -98,10 +114,101 @@ public class UserService {
         if (updated.getRoles() != null && !updated.getRoles().isEmpty()) {
             existing.setRoles(updated.getRoles());
         }
-        // S5: availability is automatic only (derived from clock events), so a PUT body
-        // can never change it — the dedicated admin endpoint is the only manual override.
-        existing.setActive(updated.isActive());
+        Boolean active = updated.getActive();
+        if (active != null && active != existing.isActive()) {
+            applyActive(existing, active);
+        }
         return userRepository.save(existing);
+    }
+
+    /** S9: the dedicated activate/deactivate action, guarded the same way as a PUT. */
+    public User setActive(Long id, boolean active) {
+        User target = findById(id);
+        if (target.isActive() != active) {
+            applyActive(target, active);
+        }
+        return userRepository.save(target);
+    }
+
+    /**
+     * S9/S12: flipping a flag off must never leave the system without an administrator,
+     * and must never let an account switch itself off. Both refusals are conflicts (409),
+     * because the request is well-formed and only the resulting state is not allowed.
+     */
+    private void applyActive(User target, boolean active) {
+        if (active) {
+            target.setActive(true);
+            return;
+        }
+        User caller = SecurityUtils.getCurrentUser(userRepository);
+        if (caller.getId().equals(target.getId())) {
+            throw new IllegalStateException("You cannot deactivate your own account");
+        }
+        assertNotLastActiveAdmin(target);
+        target.setActive(false);
+    }
+
+    private void assertNotLastActiveAdmin(User target) {
+        if (isAdmin(target) && userRepository.countActiveAdmins() <= 1) {
+            throw new IllegalStateException("Cannot remove the last active administrator");
+        }
+    }
+
+    /**
+     * S10: hand out one temporary password, force a change on the next login and kill
+     * every live session so the old credentials stop working immediately. The plain
+     * value is returned exactly once and never stored.
+     */
+    public String resetPassword(Long id) {
+        User target = findById(id);
+        String temporaryPassword = generateTemporaryPassword();
+        target.setPassword(passwordEncoder.encode(temporaryPassword));
+        target.setMustChangePassword(true);
+        userRepository.save(target);
+        revokeAllSessions(target);
+        return temporaryPassword;
+    }
+
+    private String generateTemporaryPassword() {
+        StringBuilder password = new StringBuilder(TEMP_PASSWORD_LENGTH);
+        for (int i = 0; i < TEMP_PASSWORD_LENGTH; i++) {
+            password.append(TEMP_PASSWORD_ALPHABET.charAt(RANDOM.nextInt(TEMP_PASSWORD_ALPHABET.length())));
+        }
+        return password.toString();
+    }
+
+    /**
+     * S11: an ADMIN may point any user at any project. The project must exist; the
+     * assignment itself is unrestricted because an ADMIN is not bound to
+     * {@code project_operators}.
+     */
+    public User setCurrentProject(Long userId, Long projectId) {
+        User target = findById(userId);
+        target.setCurrentProject(requireProject(projectId));
+        return userRepository.save(target);
+    }
+
+    /**
+     * S6: an OPERATOR switches its own current project, but only among the projects it
+     * is assigned to in {@code project_operators} — anything else is a 403, not a 404,
+     * so the endpoint never confirms the existence of projects the caller cannot see.
+     */
+    public UserProfileDTO switchMyCurrentProject(Long projectId) {
+        User caller = loadCaller();
+        Project project = requireProject(projectId);
+        if (!projectRepository.existsByProjectIdAndOperatorId(projectId, caller.getId())) {
+            throw new AccessDeniedException("You are not assigned to this project");
+        }
+        caller.setCurrentProject(project);
+        return toProfile(userRepository.save(caller));
+    }
+
+    private Project requireProject(Long projectId) {
+        if (projectId == null) {
+            throw new IllegalArgumentException("projectId is required");
+        }
+        return projectRepository.findById(projectId)
+                .orElseThrow(() -> new IllegalArgumentException("Project not found: " + projectId));
     }
 
     public void delete(Long id) {

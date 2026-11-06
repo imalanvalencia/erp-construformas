@@ -13,7 +13,7 @@ import { LinkComponent } from "@app/components/shared";
       <mat-icon fontSet="material-icons-outlined">person</mat-icon>
     </button>
     <mat-menu #user="matMenu">
-      <app-link variant="text" route="/settings">Configuracion</app-link>
+      <app-link variant="text" route="/profile">Configuracion</app-link>
       <button (click)="onLogout()" title="Cerrar sesión" mat-menu-item>Cerrar Sesion</button>
     </mat-menu>
   `,

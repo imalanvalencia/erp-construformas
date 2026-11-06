@@ -13,6 +13,7 @@ import { InvoicesComponent } from './features/invoices/invoices.component';
 import { SuppliersComponent } from './features/suppliers/suppliers.component';
 import { PaymentsComponent } from './features/payments/payments.component';
 import { ClockComponent } from './features/clock/clock.component';
+import { ProfileComponent } from './features/profile/profile.component';
 import { UsersComponent } from './features/users/users.component';
 import { DesignSystem } from './features/design-system/design-system';
 
@@ -37,6 +38,7 @@ export const routes: Routes = [
       // { path: 'suppliers', component: SuppliersComponent },
       // { path: 'payments', component: PaymentsComponent },
       { path: 'clock', component: ClockComponent },
+      { path: 'profile', component: ProfileComponent },
       { path: 'users', component: UsersComponent, canActivate: [adminGuard] },
     ],
   },

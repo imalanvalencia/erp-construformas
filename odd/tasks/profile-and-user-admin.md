@@ -4,9 +4,11 @@ Objective: build the self-service `/profile` area and close the real gaps in the
 admin module (activate/deactivate, password reset, project assignment, delete
 protection), with availability becoming automatic instead of manually marked.
 
-Branch: `feat/profile-user-admin` (from `dev`). Delivery strategy: `stacked-to-main`
-(decided by the user 2026-11-03 after crossing the 400-line budget): one PR per work
-unit, each PR targeting `dev` in order. Slice boundaries are recorded in the Tasks/Log.
+Branch: `feat/profile-user-admin` (from `dev`). Delivery strategy: stacked
+(decided by the user 2026-11-03 after crossing the 400-line budget; target `dev`,
+never `main` — confirmed 2026-11-06): one PR per work unit, each PR chained to the
+previous one and retargeted to `dev` after its parent merges. Slice boundaries are
+recorded in the Tasks/Log.
 Test runners: backend `cd backend && ./mvnw test`; frontend `cd frontend && ng test`
 (pnpm is not on PATH in this environment — use `./node_modules/.bin/ng test`).
 Strict TDD: RED observed before GREEN on every behavior change.
@@ -225,3 +227,12 @@ Both full suites pass (`cd backend && ./mvnw test`, `cd frontend && ng test`) an
 - 2026-11-06 — T7 verification green: backend 328 tests, frontend 246 passed (2
   pre-existing), `ng build` OK with the pre-existing budget warning. Feature S1–S14
   complete; all T0–T7 closed.
+- 2026-11-06 — user decision: the stacked chain targets `dev`, never `main`
+  ("si vamos a dev nunca a main"). Created 9 stacked PRs (bases chained, each
+  retarget to `dev` after its parent merges): GitHub #1 (T0, 83), #3 (T1+spec, 494),
+  #2 (V15, 85), #4 (password/sessions, 316), #5 (availability, 118), #7 (admin
+  actions, 640), #6 (delete guards, 367), #8 (profile UI, 1188), #9 (admin UI+close,
+  746). GitHub numbers are shuffled vs chain position due to parallel creation;
+  each PR body carries the corrected cross-reference. `size:exception` accepted by
+  the maintainer for the four PRs over 400 lines (#3, #7, #8, #9): one honest
+  slicing pass found no cohesive split (tests travel with their unit).

@@ -1,21 +1,14 @@
 import { Component, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import {
-  AVAILABILITY_LABELS,
-  Role,
-  User,
-  UserAvailability,
-  roleLabel,
-} from '../../../features/users/types/user.types';
+import { Role, User, roleLabel } from '../../../features/users/types/user.types';
 import { ButtonComponent } from '../../shared/button/button.component';
 import { CheckboxComponent } from '../../shared/checkbox/checkbox.component';
 import { InputComponent } from '../../shared/input/input.component';
-import { SelectComponent } from '../../shared/select/select.component';
 
 @Component({
   selector: 'app-user-form-modal',
   standalone: true,
-  imports: [FormsModule, ButtonComponent, CheckboxComponent, InputComponent, SelectComponent],
+  imports: [FormsModule, ButtonComponent, CheckboxComponent, InputComponent],
   template: `
     @if (show()) {
       <div class="fixed inset-0 z-50 flex items-center justify-center">
@@ -50,13 +43,6 @@ import { SelectComponent } from '../../shared/select/select.component';
             }
           </fieldset>
 
-          <app-select
-            label="Disponibilidad"
-            [options]="availabilityOptions"
-            [value]="form().availability"
-            (valueChange)="updateField('availability', $event!)"
-          />
-
           <div class="flex justify-end gap-3 pt-2">
             <app-button variant="text" (click)="onClose.emit()">Cancelar</app-button>
             <app-button variant="filled" (click)="onSave.emit()">
@@ -81,11 +67,6 @@ export class UserFormModalComponent {
   onFormChange = output<Partial<User>>();
 
   readonly roleLabel = roleLabel;
-
-  readonly availabilityOptions = Object.entries(AVAILABILITY_LABELS).map(([value, label]) => ({
-    value: value as UserAvailability,
-    label,
-  }));
 
   hasRole(role: Role): boolean {
     return (this.form().roles ?? []).some((r) => r.id === role.id);

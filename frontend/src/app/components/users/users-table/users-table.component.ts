@@ -1,5 +1,4 @@
 import { Component, input, output } from '@angular/core';
-import { FormsModule } from '@angular/forms';
 import { User } from '../../../features/users/types/user.types';
 import { ButtonComponent } from '../../shared/button/button.component';
 import { CardComponent } from '../../shared/card/card.component';
@@ -20,7 +19,6 @@ import { BadgeComponent } from '../../shared/badge/badge.component';
               <th class="text-left py-3 px-4 font-mono text-xs font-medium text-steel uppercase">Teléfono</th>
               <th class="text-left py-3 px-4 font-mono text-xs font-medium text-steel uppercase">NIE</th>
               <th class="text-left py-3 px-4 font-mono text-xs font-medium text-steel uppercase">Rol</th>
-              <th class="text-left py-3 px-4 font-mono text-xs font-medium text-steel uppercase">Disponibilidad</th>
               <th class="text-left py-3 px-4 font-mono text-xs font-medium text-steel uppercase">Estado</th>
               <th class="text-right py-3 px-4 font-mono text-xs font-medium text-steel uppercase">Acciones</th>
             </tr>
@@ -39,18 +37,22 @@ import { BadgeComponent } from '../../shared/badge/badge.component';
                     <span class="text-steel">—</span>
                   }
                 </td>
-                <td class="py-3 px-4 text-steel">{{ formatAvailability(user.availability) }}</td>
                 <td class="py-3 px-4">
                   <app-badge [status]="user.active ? 'ACTIVE' : 'INACTIVE'" />
                 </td>
                 <td class="py-3 px-4 text-right space-x-2">
                   <app-button variant="text" size="sm" (click)="onEdit.emit(user)">Editar</app-button>
+                  <app-button variant="text" size="sm" (click)="onResetPassword.emit(user)">Reset password</app-button>
+                  <app-button variant="text" size="sm" (click)="onAssignProject.emit(user)">Project</app-button>
+                  <app-button variant="text" size="sm" (click)="onToggleActive.emit(user)">
+                    {{ user.active ? 'Deactivate' : 'Activate' }}
+                  </app-button>
                   <app-button variant="text" size="sm" (click)="onDelete.emit(user.id!)">Eliminar</app-button>
                 </td>
               </tr>
             } @empty {
               <tr>
-                <td colspan="8" class="py-8 text-center text-steel">No hay usuarios registrados.</td>
+                <td colspan="7" class="py-8 text-center text-steel">No hay usuarios registrados.</td>
               </tr>
             }
           </tbody>
@@ -64,13 +66,10 @@ export class UsersTableComponent {
 
   onEdit = output<User>();
   onDelete = output<number>();
-
-  formatAvailability(availability: string): string {
-    const map: Record<string, string> = {
-      AVAILABLE: 'Disponible',
-      ON_LEAVE: 'En Permiso',
-      INACTIVE: 'Inactivo',
-    };
-    return map[availability] || availability;
-  }
+  /** S9: `PATCH /api/users/{id}/active` with the inverted `active` flag. */
+  onToggleActive = output<User>();
+  /** S10: `POST /api/users/{id}/password-reset` — one-shot temporary password. */
+  onResetPassword = output<User>();
+  /** S11: `PUT /api/users/{id}/current-project`. */
+  onAssignProject = output<User>();
 }

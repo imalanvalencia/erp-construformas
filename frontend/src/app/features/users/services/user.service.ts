@@ -1,7 +1,7 @@
 import { inject, Injectable } from '@angular/core';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { User, UserAvailability, Role } from '../types/user.types';
+import { User, PasswordResetResponse, Role } from '../types/user.types';
 
 @Injectable({ providedIn: 'root' })
 export class UserService {
@@ -27,13 +27,28 @@ export class UserService {
   }
 
   /**
-   * Availability has its own endpoint: `UserService.update()` on the backend does not
-   * read it from the PUT body, so sending it there is silently ignored.
+   * S9: `PATCH /api/users/{id}/active`. The backend answers 409 when you deactivate
+   * your own account or when the last active ADMIN would lose its access, and both
+   * refusals arrive in the `{ "error": "..." }` envelope.
    */
-  updateAvailability(id: number, availability: UserAvailability): Observable<UserAvailability> {
-    return this.http.put<UserAvailability>(`${this.API}/${id}/availability`, JSON.stringify(availability), {
-      headers: new HttpHeaders({ 'Content-Type': 'application/json' }),
-    });
+  setActive(id: number, active: boolean): Observable<User> {
+    return this.http.patch<User>(`${this.API}/${id}/active`, { active });
+  }
+
+  /**
+   * S10: `POST /api/users/{id}/password-reset`. The plain-text password is returned
+   * exactly once — the backend only ever stores its hash.
+   */
+  resetPassword(id: number): Observable<PasswordResetResponse> {
+    return this.http.post<PasswordResetResponse>(`${this.API}/${id}/password-reset`, null);
+  }
+
+  /**
+   * S11: `PUT /api/users/{id}/current-project` — ADMIN only. Refusals arrive in the
+   * `{ "error": "..." }` envelope (400 unknown/missing project, 403 not assigned).
+   */
+  setCurrentProject(id: number, projectId: number): Observable<User> {
+    return this.http.put<User>(`${this.API}/${id}/current-project`, { projectId });
   }
 
   delete(id: number): Observable<void> {

@@ -4,10 +4,23 @@ import { of, Subject, throwError } from 'rxjs';
 import { UsersComponent } from './users.component';
 import { UserService } from './services/user.service';
 import { Role, User } from './types/user.types';
+import { ProjectService } from '@features/projects/services/project.service';
+import { Project } from '@features/projects/types/project.types';
 import { NotificationService } from '@app/services/notification.service';
 
 const OPERATOR_ROLE: Role = { id: 2, name: 'OPERATOR', description: 'Field operator' };
 const ADMIN_ROLE: Role = { id: 1, name: 'ADMIN', description: 'Administrator' };
+
+const PROJECT: Project = {
+  id: 7,
+  clientId: 1,
+  name: 'Calle 12',
+  address: 'Calle 12',
+  latitude: 40.4,
+  longitude: -3.7,
+  status: 'PLANNED',
+  active: true,
+};
 
 describe('UsersComponent', () => {
   let component: UsersComponent;
@@ -17,9 +30,12 @@ describe('UsersComponent', () => {
     getRoles: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
-    updateAvailability: ReturnType<typeof vi.fn>;
+    setActive: ReturnType<typeof vi.fn>;
+    resetPassword: ReturnType<typeof vi.fn>;
+    setCurrentProject: ReturnType<typeof vi.fn>;
     delete: ReturnType<typeof vi.fn>;
   };
+  let projectService: { getAll: ReturnType<typeof vi.fn> };
   let notifications: { success: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
 
   const existingUser: User = {
@@ -27,7 +43,6 @@ describe('UsersComponent', () => {
     name: 'Ana Uno',
     email: 'ana@example.com',
     roles: [OPERATOR_ROLE],
-    availability: 'AVAILABLE',
     active: true,
   };
 
@@ -37,15 +52,19 @@ describe('UsersComponent', () => {
       getRoles: vi.fn().mockReturnValue(of([ADMIN_ROLE, OPERATOR_ROLE])),
       create: vi.fn(),
       update: vi.fn(),
-      updateAvailability: vi.fn().mockReturnValue(of('ON_SITE')),
+      setActive: vi.fn(),
+      resetPassword: vi.fn(),
+      setCurrentProject: vi.fn(),
       delete: vi.fn().mockReturnValue(of(undefined)),
     };
+    projectService = { getAll: vi.fn().mockReturnValue(of([PROJECT])) };
     notifications = { success: vi.fn(), error: vi.fn() };
 
     await TestBed.configureTestingModule({
       imports: [UsersComponent],
       providers: [
         { provide: UserService, useValue: userService },
+        { provide: ProjectService, useValue: projectService },
         { provide: NotificationService, useValue: notifications },
       ],
     }).compileComponents();
@@ -72,7 +91,6 @@ describe('UsersComponent', () => {
       email: 'ana2@example.com',
       password: 'secreta',
       roles: [OPERATOR_ROLE],
-      availability: 'AVAILABLE',
     });
 
     component.saveUser();
@@ -80,30 +98,6 @@ describe('UsersComponent', () => {
     expect(userService.create).toHaveBeenCalledWith(
       expect.objectContaining({ roles: [OPERATOR_ROLE] }),
     );
-  });
-
-  it('persists availability through the dedicated endpoint, not the update body (S5)', () => {
-    userService.update.mockReturnValue(of({ ...existingUser, availability: 'ON_SITE' }));
-    component.openEditModal(existingUser);
-    component.onFormChange({ availability: 'ON_SITE' });
-
-    component.saveUser();
-
-    expect(userService.updateAvailability).toHaveBeenCalledWith(1, 'ON_SITE');
-    expect(userService.update).toHaveBeenCalledWith(
-      1,
-      expect.not.objectContaining({ availability: 'ON_SITE' }),
-    );
-  });
-
-  it('does not call the availability endpoint when availability is unchanged (S5)', () => {
-    userService.update.mockReturnValue(of(existingUser));
-    component.openEditModal(existingUser);
-    component.onFormChange({ name: 'Ana Editada' });
-
-    component.saveUser();
-
-    expect(userService.updateAvailability).not.toHaveBeenCalled();
   });
 
   it('filters by role client-side over the roles set (S4)', () => {
@@ -132,7 +126,6 @@ describe('UsersComponent', () => {
       ...existingUser,
       id: 2,
       roles: [ADMIN_ROLE],
-      availability: 'ON_SITE' as const,
     };
     userService.create.mockReturnValue(of(savedUser));
     component.openCreateModal();
@@ -194,6 +187,29 @@ describe('UsersComponent', () => {
     expect(component.filteredUsers()).toEqual([savedUser]);
   });
 
+  it('still saves the edit form through PUT /api/users/{id} without an availability side channel (S5)', () => {
+    userService.update.mockReturnValue(of({ ...existingUser, name: 'Ana Editada' }));
+    component.openEditModal(existingUser);
+    component.onFormChange({ name: 'Ana Editada' });
+
+    component.saveUser();
+
+    expect(userService.update).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ name: 'Ana Editada', roles: [OPERATOR_ROLE] }),
+    );
+    expect(userService.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes every manual availability control from the form and the table (S5)', () => {
+    component.openEditModal(existingUser);
+    fixture.detectChanges();
+
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).not.toContain('Disponibilidad');
+    expect(component['emptyForm']()).not.toHaveProperty('availability');
+  });
+
   it('asks for confirmation before deleting a user', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
@@ -201,5 +217,128 @@ describe('UsersComponent', () => {
 
     expect(userService.delete).toHaveBeenCalledWith(1);
     confirmSpy.mockRestore();
+  });
+
+  it('toggles the row user between active and inactive through PATCH /{id}/active (S9)', () => {
+    userService.setActive.mockReturnValue(of({ ...existingUser, active: false }));
+
+    component.toggleActive(existingUser);
+
+    expect(userService.setActive).toHaveBeenCalledWith(1, false);
+    expect(userService.getAll).toHaveBeenCalledTimes(2);
+
+    component.toggleActive({ ...existingUser, active: false });
+
+    expect(userService.setActive).toHaveBeenCalledWith(1, true);
+  });
+
+  it('surfaces the server refusal when deactivation is blocked (S9)', () => {
+    for (const message of [
+      'You cannot deactivate your own account',
+      'Cannot remove the last active administrator',
+    ]) {
+      userService.setActive.mockReturnValue(throwError(() => ({ error: { error: message } })));
+
+      component.toggleActive(existingUser);
+
+      expect(notifications.error).toHaveBeenCalledWith(message);
+    }
+  });
+
+  it('shows the temporary password once after an admin reset (S10)', () => {
+    userService.resetPassword.mockReturnValue(of({ temporaryPassword: 'Tmp-4x9K!' }));
+
+    component.resetPassword(existingUser);
+    fixture.detectChanges();
+
+    expect(userService.resetPassword).toHaveBeenCalledWith(1);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Tmp-4x9K!');
+    expect(text).toContain('sessions were revoked');
+    expect(text).toContain('next login');
+  });
+
+  it('surfaces a failed reset from the error envelope (S10)', () => {
+    userService.resetPassword.mockReturnValue(
+      throwError(() => ({ error: { error: 'User not found' } })),
+    );
+
+    component.resetPassword(existingUser);
+    fixture.detectChanges();
+
+    expect(notifications.error).toHaveBeenCalledWith('User not found');
+    expect(component.resetResult()).toBeNull();
+  });
+
+  it('assigns the current project through PUT /{id}/current-project (S11)', () => {
+    userService.setCurrentProject.mockReturnValue(
+      of({ ...existingUser, currentProjectId: 7, currentProjectName: 'Calle 12' }),
+    );
+
+    component.openProjectModal(existingUser);
+    expect(projectService.getAll).toHaveBeenCalledTimes(1);
+
+    component.assignProject(7);
+
+    expect(userService.setCurrentProject).toHaveBeenCalledWith(1, 7);
+    expect(component.showProjectModal()).toBe(false);
+    expect(notifications.success).toHaveBeenCalledWith('Current project updated.');
+    expect(userService.getAll).toHaveBeenCalledTimes(2);
+  });
+
+  it('lists the available projects in the assignment modal (S11)', () => {
+    component.openProjectModal(existingUser);
+    fixture.detectChanges();
+
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Calle 12');
+  });
+
+  it('surfaces every assignment refusal from the error envelope (S11)', () => {
+    component.openProjectModal(existingUser);
+
+    for (const message of [
+      'Project not found: 99',
+      'projectId is required',
+      'You are not assigned to this project',
+    ]) {
+      userService.setCurrentProject.mockReturnValue(throwError(() => ({ error: { error: message } })));
+
+      component.assignProject(99);
+
+      expect(notifications.error).toHaveBeenCalledWith(message);
+    }
+  });
+
+  it('shows the history refusal on delete and deactivates instead (S12)', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    userService.delete.mockReturnValue(
+      throwError(() => ({ error: { error: 'User has activity history; deactivate the account instead' } })),
+    );
+    userService.setActive.mockReturnValue(of({ ...existingUser, active: false }));
+
+    component.deleteUser(1);
+
+    expect(notifications.error).toHaveBeenCalledWith(
+      'User has activity history; deactivate the account instead',
+    );
+    expect(userService.setActive).toHaveBeenCalledWith(1, false);
+    confirmSpy.mockRestore();
+  });
+
+  it('shows the self-delete and last-admin refusals without attempting deactivation (S12)', () => {
+    for (const message of [
+      'You cannot delete your own account',
+      'Cannot remove the last active administrator',
+    ]) {
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+      userService.delete.mockReturnValue(throwError(() => ({ error: { error: message } })));
+
+      component.deleteUser(1);
+
+      expect(notifications.error).toHaveBeenCalledWith(message);
+      expect(userService.setActive).not.toHaveBeenCalled();
+      confirmSpy.mockRestore();
+    }
   });
 });

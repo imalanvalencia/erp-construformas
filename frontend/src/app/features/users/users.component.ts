@@ -1,18 +1,28 @@
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { switchMap } from 'rxjs';
 import { UserService } from './services/user.service';
 import { Role, User } from './types/user.types';
+import { ProjectService } from '@features/projects/services/project.service';
+import { Project } from '@features/projects/types/project.types';
 import { ButtonComponent } from '@shared-components/button/button.component';
 import { UsersTableComponent } from '@components/users/users-table/users-table.component';
 import { UserFormModalComponent } from '@components/users/user-form-modal/user-form-modal.component';
+import { UserProjectModalComponent } from '@components/users/user-project-modal/user-project-modal.component';
+import { PasswordResetModalComponent } from '@components/users/password-reset-modal/password-reset-modal.component';
 import { UsersFiltersComponent } from '@components/users/users-filters/users-filters.component';
 import { NotificationService } from '@app/services/notification.service';
 
 @Component({
   selector: 'app-users',
   standalone: true,
-  imports: [ButtonComponent, UsersTableComponent, UserFormModalComponent, UsersFiltersComponent],
+  imports: [
+    ButtonComponent,
+    UsersTableComponent,
+    UserFormModalComponent,
+    UserProjectModalComponent,
+    PasswordResetModalComponent,
+    UsersFiltersComponent,
+  ],
   template: `
     <div class="space-y-6">
       <div class="flex items-center justify-between">
@@ -26,6 +36,9 @@ import { NotificationService } from '@app/services/notification.service';
         [users]="filteredUsers()"
         (onEdit)="openEditModal($event)"
         (onDelete)="deleteUser($event)"
+        (onToggleActive)="toggleActive($event)"
+        (onResetPassword)="resetPassword($event)"
+        (onAssignProject)="openProjectModal($event)"
       />
 
       <app-user-form-modal
@@ -37,6 +50,22 @@ import { NotificationService } from '@app/services/notification.service';
         (onClose)="closeModal()"
         (onSave)="saveUser()"
         (onFormChange)="onFormChange($event)"
+      />
+
+      <app-user-project-modal
+        [show]="showProjectModal()"
+        [userName]="projectModalUser?.name ?? ''"
+        [projects]="projects()"
+        [currentProjectId]="projectModalUser?.currentProjectId"
+        (onClose)="closeProjectModal()"
+        (onAssign)="assignProject($event)"
+      />
+
+      <app-password-reset-modal
+        [show]="!!resetResult()"
+        [userName]="resetResult()?.userName ?? ''"
+        [temporaryPassword]="resetResult()?.temporaryPassword ?? ''"
+        (onClose)="resetResult.set(null)"
       />
     </div>
   `,
@@ -50,10 +79,21 @@ export class UsersComponent {
   editingUser: User | null = null;
   formData: Partial<User> = this.emptyForm();
   rolesError = signal('');
+
+  /** S10: the one-shot reset result, rendered by the confirmation modal. */
+  resetResult = signal<{ userName: string; temporaryPassword: string } | null>(null);
+
+  /** S11: the user whose current project is being assigned. */
+  projectModalUser: User | null = null;
+  showProjectModal = signal(false);
+  projects = signal<Project[]>([]);
+  private projectsLoaded = false;
+
   private loadVersion = 0;
 
   private destroyRef = inject(DestroyRef);
   private userService = inject(UserService);
+  private projectService = inject(ProjectService);
   private notifications = inject(NotificationService);
 
   constructor() {
@@ -129,20 +169,10 @@ export class UsersComponent {
   }
 
   private updateExisting(id: number, roles: Role[]): void {
-    const availability = this.formData.availability;
-    const availabilityChanged = !!availability && availability !== this.editingUser?.availability;
+    // Availability is automatic-only: it never travels in the PUT body anymore (S5).
+    const payload = { ...this.formData, roles } as User;
 
-    // Availability has its own endpoint; sending it in the PUT body is ignored server-side.
-    const { availability: _ignored, ...rest } = this.formData;
-    const payload = { ...rest, roles } as User;
-
-    const request$ = availabilityChanged
-      ? this.userService
-          .updateAvailability(id, availability)
-          .pipe(switchMap(() => this.userService.update(id, payload)))
-      : this.userService.update(id, payload);
-
-    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.userService.update(id, payload).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.loadUsers();
         this.closeModal();
@@ -170,11 +200,98 @@ export class UsersComponent {
     });
   }
 
+  /** S9: the row toggle — activates or deactivates through `PATCH /{id}/active`. */
+  toggleActive(user: User): void {
+    if (!user.id) return;
+    this.applyActive(user.id, !user.active);
+  }
+
+  private applyActive(id: number, active: boolean): void {
+    this.userService.setActive(id, active).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => this.loadUsers(),
+      error: (error) =>
+        this.notifications.error(
+          this.serverMessage(error, 'Could not update the account status.'),
+        ),
+    });
+  }
+
+  /** S10: shows the one-shot temporary password in the confirmation modal. */
+  resetPassword(user: User): void {
+    if (!user.id) return;
+    this.userService.resetPassword(user.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (response) =>
+        this.resetResult.set({
+          userName: user.name,
+          temporaryPassword: response.temporaryPassword,
+        }),
+      error: (error) =>
+        this.notifications.error(
+          this.serverMessage(error, 'Could not generate the temporary password.'),
+        ),
+    });
+  }
+
+  openProjectModal(user: User): void {
+    this.projectModalUser = user;
+    this.showProjectModal.set(true);
+    if (this.projectsLoaded) return;
+    this.projectService.getAll().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (projects) => {
+        this.projectsLoaded = true;
+        this.projects.set(projects);
+      },
+      error: (error) =>
+        this.notifications.error(this.serverMessage(error, 'Could not load the projects.')),
+    });
+  }
+
+  closeProjectModal(): void {
+    this.showProjectModal.set(false);
+    this.projectModalUser = null;
+  }
+
+  /** S11: `PUT /api/users/{id}/current-project`; 400/403 refusals surface verbatim. */
+  assignProject(projectId: number): void {
+    const id = this.projectModalUser?.id;
+    if (!id) return;
+    this.userService.setCurrentProject(id, projectId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.loadUsers();
+        this.closeProjectModal();
+        this.notifications.success('Current project updated.');
+      },
+      error: (error) =>
+        this.notifications.error(
+          this.serverMessage(error, 'Could not assign the current project.'),
+        ),
+    });
+  }
+
+  /**
+   * S12: delete stays available, but the backend now refuses users with history.
+   * The server message is shown verbatim and, when it points at deactivation,
+   * the user is offered the supported path instead.
+   */
   deleteUser(id: number): void {
     if (!confirm('¿Estás seguro de eliminar este usuario?')) return;
     this.userService.delete(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => this.loadUsers(),
+      error: (error) => {
+        const message = this.serverMessage(error, 'Could not delete the user.');
+        this.notifications.error(message);
+        const offersDeactivation = message.includes('deactivate the account instead');
+        if (offersDeactivation && confirm('The server refused the delete. Deactivate the account instead?')) {
+          this.applyActive(id, false);
+        }
+      },
     });
+  }
+
+  /** The backend's error envelope everywhere is `{ "error": "<message>" }`. */
+  private serverMessage(error: unknown, fallback: string): string {
+    const envelope = (error as { error?: { error?: unknown } } | null | undefined)?.error?.error;
+    return typeof envelope === 'string' && envelope.length > 0 ? envelope : fallback;
   }
 
   private matchesActiveFilter(users: User[]): User[] {
@@ -190,7 +307,6 @@ export class UsersComponent {
       nie: '',
       password: '',
       roles: [],
-      availability: 'AVAILABLE',
       active: true,
     };
   }

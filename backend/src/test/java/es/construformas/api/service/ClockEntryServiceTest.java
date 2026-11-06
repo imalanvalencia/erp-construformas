@@ -227,4 +227,20 @@ class ClockEntryServiceTest {
         clockEntryService.delete(1L);
         verify(clockEntryRepository).deleteById(1L);
     }
+
+    @Test
+    @DisplayName("S7: findByCallerAndDateRange should resolve the caller and scope to it")
+    void shouldFindByCallerAndDateRange() {
+        User caller = authenticate(
+                User.builder().id(5L).email("op@test.com").build(), "OPERATOR");
+        LocalDateTime start = LocalDateTime.of(2025, 1, 1, 0, 0);
+        LocalDateTime end = LocalDateTime.of(2025, 1, 31, 23, 59);
+        when(clockEntryRepository.findByUserIdAndTimestampBetweenOrderByTimestampDesc(5L, start, end))
+                .thenReturn(List.of(ClockEntry.builder().id(1L).user(caller).build()));
+
+        var result = clockEntryService.findByCallerAndDateRange(start, end);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getUser()).isEqualTo(caller);
+    }
 }

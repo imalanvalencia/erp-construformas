@@ -4,6 +4,8 @@ import es.construformas.api.model.Role;
 import es.construformas.api.model.User;
 import es.construformas.api.model.UserAvailability;
 import es.construformas.api.model.UserRole;
+import es.construformas.api.dto.UserProfileDTO;
+import es.construformas.api.dto.UserProfileUpdateRequest;
 import es.construformas.api.exception.UserNotFoundException;
 import es.construformas.api.repository.RoleRepository;
 import es.construformas.api.repository.UserRepository;
@@ -263,5 +265,91 @@ class UserServiceTest {
     void shouldDeleteUser() {
         userService.delete(1L);
         verify(userRepository).deleteById(1L);
+    }
+
+    @Test
+    @DisplayName("S2: getProfile should resolve the authenticated caller")
+    void getProfileShouldResolveCaller() {
+        authenticateAs("op@test.com");
+        User caller = User.builder().id(7L).name("Worker").email("op@test.com")
+                .phone("555").nie("X1").availability(UserAvailability.ON_SITE).active(true)
+                .roles(Set.of(Role.builder().id(2L).name("OPERATOR").build())).build();
+        when(userRepository.findWithCurrentProjectByEmail("op@test.com")).thenReturn(Optional.of(caller));
+
+        UserProfileDTO profile = userService.getProfile();
+
+        assertThat(profile.getId()).isEqualTo(7L);
+        assertThat(profile.getName()).isEqualTo("Worker");
+        assertThat(profile.getEmail()).isEqualTo("op@test.com");
+        assertThat(profile.getPhone()).isEqualTo("555");
+        assertThat(profile.getNie()).isEqualTo("X1");
+        assertThat(profile.getAvailability()).isEqualTo(UserAvailability.ON_SITE);
+        assertThat(profile.isActive()).isTrue();
+        assertThat(profile.getCurrentProjectId()).isNull();
+    }
+
+    @Test
+    @DisplayName("S3: updateProfile should apply only phone and nie")
+    void updateProfileShouldApplyOnlyContactFields() {
+        authenticateAs("op@test.com");
+        User caller = User.builder().id(7L).email("op@test.com").phone("111").nie("OLD")
+                .roles(Set.of(Role.builder().id(2L).name("OPERATOR").build())).build();
+        when(userRepository.findWithCurrentProjectByEmail("op@test.com")).thenReturn(Optional.of(caller));
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        UserProfileDTO profile = userService.updateProfile(
+                new UserProfileUpdateRequest("222", "NEW"));
+
+        assertThat(profile.getPhone()).isEqualTo("222");
+        assertThat(profile.getNie()).isEqualTo("NEW");
+        assertThat(caller.getRoles()).hasSize(1);
+        assertThat(caller.isActive()).isTrue();
+        assertThat(profile.getRoles()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("S3: updateProfile should clear a contact field when sent empty")
+    void updateProfileShouldClearOnBlank() {
+        authenticateAs("op@test.com");
+        User caller = User.builder().id(7L).email("op@test.com").phone("111").nie("OLD").build();
+        when(userRepository.findWithCurrentProjectByEmail("op@test.com")).thenReturn(Optional.of(caller));
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        UserProfileDTO profile = userService.updateProfile(
+                new UserProfileUpdateRequest("", ""));
+
+        assertThat(profile.getPhone()).isNull();
+        assertThat(profile.getNie()).isNull();
+    }
+
+    @Test
+    @DisplayName("S3: updateProfile should keep a field it was not sent")
+    void updateProfileShouldKeepUnsentField() {
+        authenticateAs("op@test.com");
+        User caller = User.builder().id(7L).email("op@test.com").phone("111").nie("OLD").build();
+        when(userRepository.findWithCurrentProjectByEmail("op@test.com")).thenReturn(Optional.of(caller));
+        when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        UserProfileDTO profile = userService.updateProfile(
+                new UserProfileUpdateRequest(null, "NEW"));
+
+        assertThat(profile.getPhone()).isEqualTo("111");
+        assertThat(profile.getNie()).isEqualTo("NEW");
+    }
+
+    @Test
+    @DisplayName("S3: updateProfile should reject a phone owned by another user")
+    void updateProfileShouldRejectDuplicatePhone() {
+        authenticateAs("op@test.com");
+        User caller = User.builder().id(7L).email("op@test.com").phone("111").build();
+        when(userRepository.findWithCurrentProjectByEmail("op@test.com")).thenReturn(Optional.of(caller));
+        when(userRepository.existsByPhone("222")).thenReturn(true);
+
+        assertThatThrownBy(() -> userService.updateProfile(
+                new UserProfileUpdateRequest("222", null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Phone already exists");
+
+        verify(userRepository, never()).save(any());
     }
 }

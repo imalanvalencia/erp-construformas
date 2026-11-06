@@ -160,4 +160,22 @@ class ClockEntryControllerTest {
 
         verify(clockEntryService).delete(1L);
     }
+
+    @Test
+    @DisplayName("S7: GET /api/clock-entries/me should return the caller's entries")
+    void getMineShouldReturnEntries() throws Exception {
+        when(clockEntryService.findByCallerAndDateRange(
+                org.mockito.ArgumentMatchers.any(LocalDateTime.class),
+                org.mockito.ArgumentMatchers.any(LocalDateTime.class)))
+                .thenReturn(List.of(sampleEntry()));
+
+        mockMvc.perform(get("/api/clock-entries/me")
+                        .param("start", "2026-01-01T00:00:00")
+                        .param("end", "2026-01-31T23:59:59"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[0].userId").value(1))
+                .andExpect(jsonPath("$[0].userName").value("Worker"))
+                .andExpect(jsonPath("$[0].user").doesNotExist());
+    }
 }

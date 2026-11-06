@@ -68,6 +68,15 @@ public class ClockEntryService {
         return clockEntryRepository.findByUserIdAndTimestampBetweenOrderByTimestampDesc(userId, start, end);
     }
 
+    /**
+     * S7: the authenticated caller's own entries in a range. The caller is resolved from
+     * the security context, so the caller id is never taken from the URL.
+     */
+    public List<ClockEntry> findByCallerAndDateRange(LocalDateTime start, LocalDateTime end) {
+        User caller = SecurityUtils.getCurrentUser(userRepository);
+        return findByUserAndDateRange(caller.getId(), start, end);
+    }
+
     public List<ClockEntry> findByProjectAndDateRange(Long projectId, LocalDateTime start, LocalDateTime end) {
         if (SecurityUtils.hasRole("OPERATOR")) {
             User user = SecurityUtils.getCurrentUser(userRepository);

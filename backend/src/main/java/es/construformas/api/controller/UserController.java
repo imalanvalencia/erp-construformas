@@ -3,6 +3,8 @@ package es.construformas.api.controller;
 import es.construformas.api.model.User;
 import es.construformas.api.model.UserAvailability;
 import es.construformas.api.model.UserRole;
+import es.construformas.api.dto.UserProfileDTO;
+import es.construformas.api.dto.UserProfileUpdateRequest;
 import es.construformas.api.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +25,18 @@ public class UserController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<User> create(@Valid @RequestBody User user) {
         return ResponseEntity.status(HttpStatus.CREATED).body(userService.create(user));
+    }
+
+    @GetMapping("/me")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    public ResponseEntity<UserProfileDTO> getProfile() {
+        return ResponseEntity.ok(userService.getProfile());
+    }
+
+    @PutMapping("/me")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    public ResponseEntity<UserProfileDTO> updateProfile(@RequestBody UserProfileUpdateRequest request) {
+        return ResponseEntity.ok(userService.updateProfile(request));
     }
 
     @GetMapping("/{id}")

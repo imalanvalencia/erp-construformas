@@ -1,6 +1,9 @@
 package es.construformas.api.service;
 
 import es.construformas.api.exception.UserNotFoundException;
+import es.construformas.api.dto.UserProfileDTO;
+import es.construformas.api.dto.UserProfileUpdateRequest;
+import es.construformas.api.model.Project;
 import es.construformas.api.model.Role;
 import es.construformas.api.model.User;
 import es.construformas.api.model.UserAvailability;
@@ -95,6 +98,72 @@ public class UserService {
 
     public void delete(Long id) {
         userRepository.deleteById(id);
+    }
+
+    /**
+     * The authenticated caller's own profile (S2). The caller comes from the security
+     * context, never from a path variable, so an OPERATOR can only ever read itself.
+     */
+    public UserProfileDTO getProfile() {
+        return toProfile(loadCaller());
+    }
+
+    /**
+     * Self-service contact edit (S3): only phone and nie. Name, email, roles, active and
+     * availability are an ADMIN's to change. A null value keeps the current one, a blank
+     * value clears it.
+     */
+    public UserProfileDTO updateProfile(UserProfileUpdateRequest request) {
+        User caller = loadCaller();
+
+        String phone = request.getPhone();
+        if (phone != null) {
+            phone = phone.isBlank() ? null : phone;
+            assertContactIsFree(caller, phone, null);
+            caller.setPhone(phone);
+        }
+
+        String nie = request.getNie();
+        if (nie != null) {
+            nie = nie.isBlank() ? null : nie;
+            assertContactIsFree(caller, null, nie);
+            caller.setNie(nie);
+        }
+
+        return toProfile(userRepository.save(caller));
+    }
+
+    /** Both columns are UNIQUE, so a duplicate must surface as 400, not as a DB 500. */
+    private void assertContactIsFree(User caller, String phone, String nie) {
+        if (phone != null && !phone.equals(caller.getPhone()) && userRepository.existsByPhone(phone)) {
+            throw new IllegalArgumentException("Phone already exists");
+        }
+        if (nie != null && !nie.equals(caller.getNie()) && userRepository.existsByNie(nie)) {
+            throw new IllegalArgumentException("NIE already exists");
+        }
+    }
+
+    private User loadCaller() {
+        String email = SecurityUtils.getCurrentUserEmail();
+        return userRepository.findWithCurrentProjectByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("User not found for email: " + email));
+    }
+
+    private UserProfileDTO toProfile(User user) {
+        Project project = user.getCurrentProject();
+        return UserProfileDTO.builder()
+                .id(user.getId())
+                .name(user.getName())
+                .email(user.getEmail())
+                .phone(user.getPhone())
+                .nie(user.getNie())
+                .roles(user.getRoles())
+                .availability(user.getAvailability())
+                .currentProjectId(project != null ? project.getId() : null)
+                .currentProjectName(project != null ? project.getName() : null)
+                .active(user.isActive())
+                .createdAt(user.getCreatedAt())
+                .build();
     }
 
     public UserAvailability getAvailability(Long id) {

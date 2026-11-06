@@ -63,8 +63,8 @@ export class SidebarComponent {
   ];
 
   get visibleNavItems(): NavItem[] {
-    const user = this.authService.getUser();
-    const isAdmin = user?.roles?.includes('ROLE_ADMIN') ?? false;
+    // The API returns bare role names ("ADMIN"), not Spring's "ROLE_ADMIN".
+    const isAdmin = this.authService.hasRole('ADMIN');
     return this.allNavItems.filter((item) => {
       if (item.roles) return item.roles.some((role) => this.authService.hasRole(role));
       return !item.adminOnly || isAdmin;

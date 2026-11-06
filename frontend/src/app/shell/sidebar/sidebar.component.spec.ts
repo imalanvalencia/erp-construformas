@@ -40,6 +40,20 @@ describe('SidebarComponent', () => {
     return item?.querySelector('mat-icon')?.textContent?.trim() ?? null;
   };
 
+  describe('Usuarios entry', () => {
+    it('shows the entry to an ADMIN', async () => {
+      await compile(['ADMIN']);
+
+      expect(labels().some((l) => l.includes('Usuarios'))).toBe(true);
+    });
+
+    it('hides the entry from an OPERATOR', async () => {
+      await compile(['OPERATOR']);
+
+      expect(labels().some((l) => l.includes('Usuarios'))).toBe(false);
+    });
+  });
+
   describe('Fichajes entry (S6)', () => {
     it('shows the entry with a clock icon to an OPERATOR', async () => {
       await compile(['OPERATOR']);

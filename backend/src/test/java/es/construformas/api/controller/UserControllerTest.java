@@ -225,6 +225,30 @@ class UserControllerTest {
     }
 
     @Test
+    @DisplayName("S12: DELETE /api/users/{id} should return 409 for a user with history")
+    void deleteUserShouldReturn409WithHistory() throws Exception {
+        doThrow(new IllegalStateException(
+                "User has activity history; deactivate the account instead"))
+                .when(userService).delete(3L);
+
+        mockMvc.perform(delete("/api/users/3"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error")
+                        .value("User has activity history; deactivate the account instead"));
+    }
+
+    @Test
+    @DisplayName("S12: DELETE /api/users/{id} should return 409 on self-deletion")
+    void deleteUserShouldReturn409OnSelfDeletion() throws Exception {
+        doThrow(new IllegalStateException("You cannot delete your own account"))
+                .when(userService).delete(9L);
+
+        mockMvc.perform(delete("/api/users/9"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("You cannot delete your own account"));
+    }
+
+    @Test
     @DisplayName("GET /api/users/{id}/availability should return availability")
     void getAvailabilityShouldReturn() throws Exception {
         when(userService.getAvailability(1L)).thenReturn(UserAvailability.ON_SITE);

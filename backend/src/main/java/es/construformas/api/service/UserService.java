@@ -211,7 +211,24 @@ public class UserService {
                 .orElseThrow(() -> new IllegalArgumentException("Project not found: " + projectId));
     }
 
+    /**
+     * S12: physical delete stays for accounts that own nothing. An account that is
+     * referenced, is the caller, or is the last administrator is refused with a 409 —
+     * deactivation is the supported way to retire it.
+     */
     public void delete(Long id) {
+        User target = findById(id);
+        User caller = SecurityUtils.getCurrentUser(userRepository);
+        if (caller.getId().equals(target.getId())) {
+            throw new IllegalStateException("You cannot delete your own account");
+        }
+        if (target.isActive()) {
+            assertNotLastActiveAdmin(target);
+        }
+        if (userRepository.hasHistory(id)) {
+            throw new IllegalStateException(
+                    "User has activity history; deactivate the account instead");
+        }
         userRepository.deleteById(id);
     }
 

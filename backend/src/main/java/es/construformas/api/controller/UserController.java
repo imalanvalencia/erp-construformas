@@ -4,10 +4,14 @@ import es.construformas.api.model.User;
 import es.construformas.api.model.UserAvailability;
 import es.construformas.api.model.UserRole;
 import es.construformas.api.dto.ChangePasswordRequest;
+import es.construformas.api.dto.CurrentProjectRequest;
+import es.construformas.api.dto.PasswordResetResponse;
 import es.construformas.api.dto.RefreshRequest;
 import es.construformas.api.dto.SessionDTO;
+import es.construformas.api.dto.UserActiveRequest;
 import es.construformas.api.dto.UserProfileDTO;
 import es.construformas.api.dto.UserProfileUpdateRequest;
+import es.construformas.api.dto.UserUpdateRequest;
 import es.construformas.api.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -62,6 +66,18 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * S6: an OPERATOR moves itself to another of its assigned projects. The 403 for an
+     * unassigned project comes from the service, so the endpoint never confirms the
+     * existence of projects the caller cannot see.
+     */
+    @PutMapping("/me/current-project")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    public ResponseEntity<UserProfileDTO> switchMyCurrentProject(
+            @Valid @RequestBody CurrentProjectRequest request) {
+        return ResponseEntity.ok(userService.switchMyCurrentProject(request.getProjectId()));
+    }
+
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     public ResponseEntity<User> getById(@PathVariable Long id) {
@@ -82,8 +98,36 @@ public class UserController {
 
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<User> update(@PathVariable Long id, @RequestBody User user) {
+    public ResponseEntity<User> update(@PathVariable Long id, @RequestBody UserUpdateRequest user) {
         return ResponseEntity.ok(userService.update(id, user));
+    }
+
+    /** S9: activate / deactivate. Both guards answer 409 through the service. */
+    @PatchMapping("/{id}/active")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<User> setActive(@PathVariable Long id,
+                                          @Valid @RequestBody UserActiveRequest request) {
+        return ResponseEntity.ok(userService.setActive(id, request.getActive()));
+    }
+
+    /**
+     * S10: one temporary password, returned once. It is stored only as a hash, so the
+     * caller must copy it before the response leaves the screen.
+     */
+    @PostMapping("/{id}/password-reset")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<PasswordResetResponse> resetPassword(@PathVariable Long id) {
+        return ResponseEntity.ok(PasswordResetResponse.builder()
+                .temporaryPassword(userService.resetPassword(id))
+                .build());
+    }
+
+    /** S11: an ADMIN may point any user at any project. */
+    @PutMapping("/{id}/current-project")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<User> setCurrentProject(@PathVariable Long id,
+                                                  @Valid @RequestBody CurrentProjectRequest request) {
+        return ResponseEntity.ok(userService.setCurrentProject(id, request.getProjectId()));
     }
 
     @DeleteMapping("/{id}")

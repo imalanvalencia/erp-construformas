@@ -186,8 +186,8 @@ class UserServiceTest {
     }
 
     @Test
-    @DisplayName("S2: Update should apply email, roles and availability")
-    void shouldApplyEmailRolesAndAvailabilityOnUpdate() {
+    @DisplayName("S5: Update should apply email and roles but never availability")
+    void shouldApplyEmailAndRolesButIgnoreAvailabilityOnUpdate() {
         Role admin = Role.builder().id(1L).name("ADMIN").build();
         Role operator = Role.builder().id(2L).name("OPERATOR").build();
         User existing = User.builder().id(1L).name("Old").email("old@test.com")
@@ -205,7 +205,7 @@ class UserServiceTest {
 
         assertThat(result.getEmail()).isEqualTo("new@test.com");
         assertThat(result.getRoles()).containsExactlyInAnyOrder(admin, operator);
-        assertThat(result.getAvailability()).isEqualTo(UserAvailability.ON_SITE);
+        assertThat(result.getAvailability()).isEqualTo(UserAvailability.AVAILABLE);
         assertThat(result.getPassword()).isEqualTo("encoded");
     }
 

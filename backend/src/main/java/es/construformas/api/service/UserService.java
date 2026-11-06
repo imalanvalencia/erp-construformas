@@ -98,7 +98,8 @@ public class UserService {
         if (updated.getRoles() != null && !updated.getRoles().isEmpty()) {
             existing.setRoles(updated.getRoles());
         }
-        if (updated.getAvailability() != null) existing.setAvailability(updated.getAvailability());
+        // S5: availability is automatic only (derived from clock events), so a PUT body
+        // can never change it — the dedicated admin endpoint is the only manual override.
         existing.setActive(updated.isActive());
         return userRepository.save(existing);
     }

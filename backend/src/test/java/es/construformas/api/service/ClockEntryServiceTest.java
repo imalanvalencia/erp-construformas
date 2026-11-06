@@ -133,6 +133,50 @@ class ClockEntryServiceTest {
     }
 
     @Test
+    @DisplayName("S5: an ENTRY should move the user's availability to ON_SITE")
+    void registerEntryShouldSetOnSite() {
+        User user = authenticate(
+                User.builder().id(1L).email("worker@test.com")
+                        .availability(UserAvailability.AVAILABLE).build(), "OPERATOR");
+        Project project = Project.builder()
+                .id(1L).latitude(40.0).longitude(-3.0).allowedRadiusMeters(50).build();
+        ClockEntry entry = ClockEntry.builder()
+                .user(user).project(project)
+                .clockType(ClockType.ENTRY)
+                .userLatitude(40.0001).userLongitude(-3.0).build();
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(clockEntryRepository.save(any(ClockEntry.class))).thenAnswer(i -> i.getArgument(0));
+
+        clockEntryService.register(entry);
+
+        assertThat(user.getAvailability()).isEqualTo(UserAvailability.ON_SITE);
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    @DisplayName("S5: an EXIT should move the user's availability back to AVAILABLE")
+    void registerExitShouldSetAvailable() {
+        User user = authenticate(
+                User.builder().id(1L).email("worker@test.com")
+                        .availability(UserAvailability.ON_SITE).build(), "OPERATOR");
+        Project project = Project.builder()
+                .id(1L).latitude(40.0).longitude(-3.0).allowedRadiusMeters(50).build();
+        ClockEntry entry = ClockEntry.builder()
+                .user(user).project(project)
+                .clockType(ClockType.EXIT)
+                .userLatitude(40.0001).userLongitude(-3.0).build();
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(clockEntryRepository.save(any(ClockEntry.class))).thenAnswer(i -> i.getArgument(0));
+
+        clockEntryService.register(entry);
+
+        assertThat(user.getAvailability()).isEqualTo(UserAvailability.AVAILABLE);
+        verify(userRepository).save(user);
+    }
+
+    @Test
     @DisplayName("Register clock entry outside radius should throw")
     void shouldRejectClockEntryOutsideRadius() {
         User user = authenticate(

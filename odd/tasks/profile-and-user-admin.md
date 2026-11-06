@@ -4,9 +4,9 @@ Objective: build the self-service `/profile` area and close the real gaps in the
 admin module (activate/deactivate, password reset, project assignment, delete
 protection), with availability becoming automatic instead of manually marked.
 
-Branch: `feat/profile-user-admin` (from `dev`). Delivery strategy: `ask-on-risk`
-(forecast > 400 authored lines; the chain decision is asked before the first commit
-that crosses the budget).
+Branch: `feat/profile-user-admin` (from `dev`). Delivery strategy: `stacked-to-main`
+(decided by the user 2026-11-03 after crossing the 400-line budget): one PR per work
+unit, each PR targeting `dev` in order. Slice boundaries are recorded in the Tasks/Log.
 Test runners: backend `cd backend && ./mvnw test`; frontend `cd frontend && ng test`
 (pnpm is not on PATH in this environment — use `./node_modules/.bin/ng test`).
 Strict TDD: RED observed before GREEN on every behavior change.
@@ -106,6 +106,9 @@ Both full suites pass (`cd backend && ./mvnw test`, `cd frontend && ng test`) an
 - A5 — `/profile` is available to every authenticated user, not just admins.
 - A6 — The sidebar access fix applied during the diagnostic pass (bare `ADMIN` role names)
   rides along as the first work unit of this branch.
+- A7 — A successful self-service password change clears `must_change_password`, so
+  "force a change on next login" is a one-shot nudge and not a permanent lock. Flagged:
+  the spec forces the change but never says who clears it.
 
 ## Tasks
 - [x] T0 — Commit the sidebar access fix + `adminGuard` (diagnostic pass, already GREEN):
@@ -118,11 +121,22 @@ Both full suites pass (`cd backend && ./mvnw test`, `cd frontend && ng test`) an
       RED: compile failures on missing `UserProfileDTO`/`UserProfileUpdateRequest`
       (observed), then GREEN: full backend suite `Tests run: 280, Failures: 0,
       Errors: 0` (baseline 266 + 14 new), `BUILD SUCCESS`. Route: inline (small).
-- [ ] T2 — Backend password + sessions (S4, S8, S9 login part): `POST /api/users/me/password`,
+- [x] T2 — Backend password + sessions (S4, S8, S9 login part): `POST /api/users/me/password`,
       `GET/DELETE /api/users/me/sessions`, V15 `must_change_password`, login `active` check,
-      `AuthResponse.mustChangePassword` + RED/GREEN tests.
-- [ ] T3 — Backend automatic availability (S5): `ClockEntryService.register` sets
+      `AuthResponse.mustChangePassword` + RED/GREEN tests. Split in two commits, the
+      migration as its own high-risk unit: `e0b004b` (V15 + entity flag + inactive login
+      403 + AuthResponse flag) and `5eddef7` (password change + sessions).
+      RED: compile failures on missing `ChangePasswordRequest`/`SessionDTO` (observed),
+      GREEN: focused 59 tests, full suite `Tests run: 292, Failures: 0, Errors: 0`.
+      Migration verified outside the suite (tests run `flyway.enabled: false`): V1–V15
+      applied on a throwaway local PostgreSQL, column `boolean NOT NULL DEFAULT false`,
+      database dropped afterwards. Route: inline (small).
+- [x] T3 — Backend automatic availability (S5): `ClockEntryService.register` sets
       `ON_SITE`/`AVAILABLE`; `update()` stops applying `availability` + RED/GREEN tests.
+      Commit `20d6c71` (4 files, 69 lines). RED observed: 3 failures
+      (`registerEntryShouldSetOnSite`, `registerExitShouldSetAvailable`,
+      `shouldApplyEmailAndRolesButIgnoreAvailabilityOnUpdate`), GREEN: full suite
+      `Tests run: 294, Failures: 0, Errors: 0`. Route: inline (small).
 - [ ] T4 — Backend admin (S9, S10, S11, S12): `PATCH /{id}/active`,
       `POST /{id}/password-reset`, `PUT /{id}/current-project`, delete guards, fix the
       `update()` primitive `active` bug + RED/GREEN tests.
@@ -154,3 +168,22 @@ Both full suites pass (`cd backend && ./mvnw test`, `cd frontend && ng test`) an
 - 2026-11-03 — T0 committed `d988a56`; T1 committed `920fa1e` (338 authored lines).
   Running total: 368 lines of the ~400 ask-on-risk budget → the chain-strategy question is
   due before the next commit. Full backend suite after T1: 280 tests green.
+- 2026-11-03 — user decision (ask-on-risk): delivery is `stacked-to-main` — one PR per
+  work unit, each PR targeting `dev` in order. Header updated accordingly.
+- 2026-11-04 — T2 committed as `e0b004b` (high-risk unit: V15 migration + inactive login
+  403 + AuthResponse flag) and `5eddef7` (password change + sessions), 401 authored lines.
+  Full suite 292 green. Tests disable Flyway (`flyway.enabled: false`, `ddl-auto:
+  create-drop`), so V15 was verified separately: V1–V15 applied on a throwaway local
+  PostgreSQL database, `must_change_password boolean NOT NULL DEFAULT false` confirmed via
+  information_schema, database dropped. The `e0b004b` tree is verified standalone in a
+  scratch worktree.
+- 2026-11-04 — known gap, deliberately out of T2 scope: `AuthService.refreshToken()` still
+  does not check `user.active`, so a user deactivated mid-session can keep refreshing until
+  its sessions are revoked (T4's reset revokes them). S9 only requires `login()` to reject;
+  raising it here as a follow-up candidate, not as silent scope.
+- 2026-11-04 — T3 committed `20d6c71` (69 authored lines). RED: 3 observed failures, then
+  GREEN at 294. Interpretation of S5's "not settable by hand anywhere": the spec clarifies
+  itself with its two named surfaces (the profile and the admin user modal), both UI, so
+  the admin REST override `PUT /api/users/{id}/availability` stays for now and the UI
+  select disappears in T6. If the endpoint should die too, that is a one-line follow-up —
+  flagged rather than silently decided.

@@ -18,4 +18,6 @@ public class AuthResponse {
     private String email;
     private List<String> roles;
     private String name;
+    /** True while an admin reset forces the user to pick a new password (S10). */
+    private boolean mustChangePassword;
 }

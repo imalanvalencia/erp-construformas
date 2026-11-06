@@ -14,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.LocalDateTime;
@@ -24,6 +25,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -89,6 +91,7 @@ class AuthServiceTest {
         assertThat(response.getAccessToken()).isEqualTo("new-access");
         assertThat(response.getRefreshToken()).isNotEqualTo("old-refresh");
         assertThat(oldToken.isRevoked()).isTrue();
+        assertThat(response.isMustChangePassword()).isFalse();
     }
 
     @Test
@@ -192,5 +195,48 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.login(request))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Email or NIE is required");
+    }
+
+    @Test
+    @DisplayName("S9: login with an inactive user should be rejected with 403")
+    void shouldRejectInactiveUser() {
+        Role opRole = Role.builder().id(2L).name("OPERATOR").build();
+        User user = User.builder().id(3L).email("off@test.com").password("hashed")
+                .roles(Set.of(opRole)).name("Off").active(false).build();
+
+        when(userRepository.findByEmail("off@test.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password", "hashed")).thenReturn(true);
+
+        LoginRequest request = new LoginRequest();
+        request.setEmail("off@test.com");
+        request.setPassword("password");
+
+        assertThatThrownBy(() -> authService.login(request))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessage("User is inactive");
+
+        verify(refreshTokenRepository, never()).save(any(RefreshToken.class));
+    }
+
+    @Test
+    @DisplayName("S10: login should surface mustChangePassword")
+    void loginShouldSurfaceMustChangePassword() {
+        Role opRole = Role.builder().id(2L).name("OPERATOR").build();
+        User user = User.builder().id(4L).email("temp@test.com").password("hashed")
+                .roles(Set.of(opRole)).name("Temp").active(true).mustChangePassword(true).build();
+
+        when(userRepository.findByEmail("temp@test.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("temp-pass", "hashed")).thenReturn(true);
+        when(jwtUtil.generateToken("temp@test.com", List.of("OPERATOR"))).thenReturn("temp-access");
+        when(refreshTokenRepository.save(any(RefreshToken.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        LoginRequest request = new LoginRequest();
+        request.setEmail("temp@test.com");
+        request.setPassword("temp-pass");
+
+        AuthResponse response = authService.login(request);
+
+        assertThat(response.isMustChangePassword()).isTrue();
     }
 }

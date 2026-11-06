@@ -145,11 +145,26 @@ Both full suites pass (`cd backend && ./mvnw test`, `cd frontend && ng test`) an
       `cannot find symbol: class UserUpdateRequest`, then GREEN full suite
       `Tests run: 328, Failures: 0, Errors: 0` (baseline 294 → +34). Route: inline
       (small, split into 2 reviewable slices).
-- [ ] T5 — Frontend `/profile` (S1, S2, S3, S4, S6, S7, S8, S13): page + `ProfileService`
-      + header link + tests.
-- [ ] T6 — Frontend admin module (S9, S10, S11, S12): active toggle, reset-password modal,
+- [x] T5 — Frontend `/profile` (S1, S2, S3, S4, S6, S7, S8, S13): page + `ProfileService`
+      + header link + tests. Commit `c422a93` (9 files, 1187 lines). RED observed:
+      compile errors on two wrong relative imports, then `profile.routes.spec` failing
+      (route entry missing) and the header spec failing (`/settings` still linked);
+      GREEN after wiring: 246 passed, only the 2 pre-existing `budget-editor`
+      failures. S7 hours: pure `calculateHours()` in `ProfileService` — sort, pair
+      EXIT with pending ENTRY, orphan EXIT ignored, trailing ENTRY adds 0. Route:
+      delegated attempt (parallel writer) failed on the OpenCode free-usage limit,
+      finished inline.
+- [x] T6 — Frontend admin module (S9, S10, S11, S12): active toggle, reset-password modal,
       project assign, remove the availability select, deactivate instead of delete + tests.
-- [ ] T7 — Verification (S14): backend suite, frontend suite, `ng build`.
+      Commit `5e71e76` (10 files, 626 lines). Specs cover every refusal envelope (409
+      self/last-admin/history, 403/400 project) and S5's removal of all manual
+      availability controls. GREEN: 246 passed / 2 pre-existing. Route: delegated
+      attempt failed on the free-usage limit, finished inline.
+- [x] T7 — Verification (S14): backend suite, frontend suite, `ng build`.
+      Backend `Tests run: 328, Failures: 0, Errors: 0` (BUILD SUCCESS).
+      Frontend 246 passed / 2 pre-existing failures (`budget-editor`).
+      `ng build` succeeds with the pre-existing bundle-budget warning
+      (942.92 kB vs 750 kB — unchanged from baseline). Date 2026-11-06.
 
 ## Log (running)
 - L1 — user, verbatim: `vamos a crear la zona de /profile y al admin de usuarios primero vamos a planificarlo, entonces veme haciendo preguntas no quiero que crees nada aun`
@@ -201,3 +216,12 @@ Both full suites pass (`cd backend && ./mvnw test`, `cd frontend && ng test`) an
   lesson: a `/tmp` copy was wiped by the overnight cleaner mid-task — slice 1 was safe in
   its commit, and the slice-2 delta was reconstructed; future scratch backups stay inside
   the workspace (git-excluded), never `/tmp`.
+- 2026-11-06 — T5 `c422a93` + T6 `5e71e76` (1813 lines across both frontend units).
+  The parallel-writer launch was attempted and both subagent sessions died on the
+  OpenCode free-usage limit before returning; the written files had landed in the
+  worktree, so the remaining gaps (two wrong relative imports, the missing route
+  entry, the `/settings` link, a wrong `mat-menu` spec selector) were finished and
+  verified inline. Frontend suite: 246 passed / 2 pre-existing failures.
+- 2026-11-06 — T7 verification green: backend 328 tests, frontend 246 passed (2
+  pre-existing), `ng build` OK with the pre-existing budget warning. Feature S1–S14
+  complete; all T0–T7 closed.

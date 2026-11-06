@@ -25,12 +25,16 @@ export interface User {
   /** Write-only on the backend: sent on create, never returned. */
   password?: string;
   roles: Role[];
-  availability: UserAvailability;
   currentProjectId?: number;
   currentProjectName?: string;
   active: boolean;
   createdAt?: string;
   updatedAt?: string;
+}
+
+/** S10: `POST /api/users/{id}/password-reset` — the plain password is returned once. */
+export interface PasswordResetResponse {
+  temporaryPassword: string;
 }
 
 /** The only two role rows seeded by V9__roles_and_availability.sql. */
@@ -47,6 +51,11 @@ export function roleLabel(name: string): string {
   return (ROLE_LABELS as Record<string, string>)[name] ?? name;
 }
 
+/**
+ * Availability is automatic-only (set server-side from clock events), so `User` no
+ * longer carries an `availability` field. The enum and its labels stay for the
+ * read-only display surfaces (S5).
+ */
 export const AVAILABILITY_LABELS: Record<UserAvailability, string> = {
   AVAILABLE: 'Disponible',
   ON_SITE: 'En sitio',

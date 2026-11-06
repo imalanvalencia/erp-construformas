@@ -160,7 +160,11 @@ Both full suites pass (`cd backend && ./mvnw test`, `cd frontend && ng test`) an
       self/last-admin/history, 403/400 project) and S5's removal of all manual
       availability controls. GREEN: 246 passed / 2 pre-existing. Route: delegated
       attempt failed on the free-usage limit, finished inline.
-- [ ] T7 — Verification (S14): backend suite, frontend suite, `ng build`.
+- [x] T7 — Verification (S14): backend suite, frontend suite, `ng build`.
+      Backend `Tests run: 328, Failures: 0, Errors: 0` (BUILD SUCCESS).
+      Frontend 246 passed / 2 pre-existing failures (`budget-editor`).
+      `ng build` succeeds with the pre-existing bundle-budget warning
+      (942.92 kB vs 750 kB — unchanged from baseline). Date 2026-11-06.
 
 ## Log (running)
 - L1 — user, verbatim: `vamos a crear la zona de /profile y al admin de usuarios primero vamos a planificarlo, entonces veme haciendo preguntas no quiero que crees nada aun`
@@ -218,3 +222,6 @@ Both full suites pass (`cd backend && ./mvnw test`, `cd frontend && ng test`) an
   worktree, so the remaining gaps (two wrong relative imports, the missing route
   entry, the `/settings` link, a wrong `mat-menu` spec selector) were finished and
   verified inline. Frontend suite: 246 passed / 2 pre-existing failures.
+- 2026-11-06 — T7 verification green: backend 328 tests, frontend 246 passed (2
+  pre-existing), `ng build` OK with the pre-existing budget warning. Feature S1–S14
+  complete; all T0–T7 closed.

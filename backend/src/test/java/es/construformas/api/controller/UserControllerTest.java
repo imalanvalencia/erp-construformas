@@ -4,6 +4,8 @@ import es.construformas.api.model.User;
 import es.construformas.api.model.UserAvailability;
 import es.construformas.api.model.UserRole;
 import es.construformas.api.model.Role;
+import es.construformas.api.dto.ChangePasswordRequest;
+import es.construformas.api.dto.SessionDTO;
 import es.construformas.api.dto.UserProfileDTO;
 import es.construformas.api.dto.UserProfileUpdateRequest;
 import es.construformas.api.exception.UserNotFoundException;
@@ -28,6 +30,8 @@ import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -253,5 +257,61 @@ class UserControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.phone").value("555-1234"))
                 .andExpect(jsonPath("$.nie").value("X123"));
+    }
+
+    @Test
+    @DisplayName("S4: POST /api/users/me/password should return 204")
+    void changePasswordShouldReturn204() throws Exception {
+        doNothing().when(userService).changeMyPassword(any(ChangePasswordRequest.class));
+
+        mockMvc.perform(post("/api/users/me/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"old\",\"newPassword\":\"new-secret\"}"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("S4: POST /api/users/me/password should return 400 on a wrong current password")
+    void changePasswordShouldReturn400OnWrongCurrent() throws Exception {
+        doThrow(new IllegalArgumentException("Current password is incorrect"))
+                .when(userService).changeMyPassword(any(ChangePasswordRequest.class));
+
+        mockMvc.perform(post("/api/users/me/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"wrong\",\"newPassword\":\"new-secret\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Current password is incorrect"));
+    }
+
+    @Test
+    @DisplayName("S8: GET /api/users/me/sessions should list sessions without the token value")
+    void listSessionsShouldReturnSafeFields() throws Exception {
+        when(userService.listSessions()).thenReturn(List.of(
+                SessionDTO.builder()
+                        .id("sess-1")
+                        .createdAt(LocalDateTime.of(2026, 1, 1, 10, 0))
+                        .expiry(LocalDateTime.of(2026, 1, 15, 10, 0))
+                        .build()));
+
+        mockMvc.perform(get("/api/users/me/sessions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[0].id").value("sess-1"))
+                .andExpect(jsonPath("$[0].createdAt").exists())
+                .andExpect(jsonPath("$[0].expiry").exists())
+                .andExpect(jsonPath("$[0].token").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("S8: DELETE /api/users/me/sessions should close the other sessions")
+    void closeSessionsShouldReturn204() throws Exception {
+        doNothing().when(userService).closeOtherSessions("current-refresh");
+
+        mockMvc.perform(delete("/api/users/me/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"current-refresh\"}"))
+                .andExpect(status().isNoContent());
+
+        verify(userService).closeOtherSessions("current-refresh");
     }
 }

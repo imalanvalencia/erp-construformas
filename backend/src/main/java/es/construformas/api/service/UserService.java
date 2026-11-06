@@ -1,13 +1,17 @@
 package es.construformas.api.service;
 
 import es.construformas.api.exception.UserNotFoundException;
+import es.construformas.api.dto.ChangePasswordRequest;
+import es.construformas.api.dto.SessionDTO;
 import es.construformas.api.dto.UserProfileDTO;
 import es.construformas.api.dto.UserProfileUpdateRequest;
 import es.construformas.api.model.Project;
+import es.construformas.api.model.RefreshToken;
 import es.construformas.api.model.Role;
 import es.construformas.api.model.User;
 import es.construformas.api.model.UserAvailability;
 import es.construformas.api.model.UserRole;
+import es.construformas.api.repository.RefreshTokenRepository;
 import es.construformas.api.repository.RoleRepository;
 import es.construformas.api.repository.UserRepository;
 import es.construformas.api.security.SecurityUtils;
@@ -17,6 +21,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 
@@ -27,6 +33,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
 
     public User create(User user) {
@@ -164,6 +171,66 @@ public class UserService {
                 .active(user.isActive())
                 .createdAt(user.getCreatedAt())
                 .build();
+    }
+
+    /**
+     * S4: the caller swaps its own password. The current one must match, the new one is
+     * encoded, every refresh token is revoked (all sessions die) and a pending
+     * {@code must_change_password} flag left by an admin reset is cleared.
+     */
+    public void changeMyPassword(ChangePasswordRequest request) {
+        User caller = loadCaller();
+        if (!passwordEncoder.matches(request.getCurrentPassword(), caller.getPassword())) {
+            throw new IllegalArgumentException("Current password is incorrect");
+        }
+        caller.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        caller.setMustChangePassword(false);
+        userRepository.save(caller);
+        revokeAllSessions(caller);
+    }
+
+    /** S8: the caller's live sessions, without the token values. */
+    public List<SessionDTO> listSessions() {
+        User caller = loadCaller();
+        LocalDateTime now = LocalDateTime.now();
+        return refreshTokenRepository.findByUserIdAndRevokedFalse(caller.getId()).stream()
+                .filter(token -> token.getExpiry().isAfter(now))
+                .sorted(Comparator.comparing(RefreshToken::getCreatedAt).reversed())
+                .map(token -> SessionDTO.builder()
+                        .id(token.getId())
+                        .createdAt(token.getCreatedAt())
+                        .expiry(token.getExpiry())
+                        .build())
+                .toList();
+    }
+
+    /**
+     * S8: revoke every session but the one the caller is asking from, so "close the
+     * others" never logs the current device out. A token that is not the caller's own
+     * is refused instead of silently revoking everything.
+     */
+    public void closeOtherSessions(String currentRefreshToken) {
+        User caller = loadCaller();
+        List<RefreshToken> tokens = refreshTokenRepository.findByUserId(caller.getId());
+        boolean ownsCurrent = tokens.stream()
+                .anyMatch(token -> token.getToken().equals(currentRefreshToken));
+        if (!ownsCurrent) {
+            throw new IllegalArgumentException("Refresh token not found");
+        }
+        tokens.stream()
+                .filter(token -> !token.getToken().equals(currentRefreshToken))
+                .filter(token -> !token.isRevoked())
+                .forEach(token -> {
+                    token.setRevoked(true);
+                    refreshTokenRepository.save(token);
+                });
+    }
+
+    private void revokeAllSessions(User user) {
+        refreshTokenRepository.findByUserIdAndRevokedFalse(user.getId()).forEach(token -> {
+            token.setRevoked(true);
+            refreshTokenRepository.save(token);
+        });
     }
 
     public UserAvailability getAvailability(Long id) {

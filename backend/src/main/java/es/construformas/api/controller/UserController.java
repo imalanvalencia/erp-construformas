@@ -3,6 +3,9 @@ package es.construformas.api.controller;
 import es.construformas.api.model.User;
 import es.construformas.api.model.UserAvailability;
 import es.construformas.api.model.UserRole;
+import es.construformas.api.dto.ChangePasswordRequest;
+import es.construformas.api.dto.RefreshRequest;
+import es.construformas.api.dto.SessionDTO;
 import es.construformas.api.dto.UserProfileDTO;
 import es.construformas.api.dto.UserProfileUpdateRequest;
 import es.construformas.api.service.UserService;
@@ -37,6 +40,26 @@ public class UserController {
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     public ResponseEntity<UserProfileDTO> updateProfile(@RequestBody UserProfileUpdateRequest request) {
         return ResponseEntity.ok(userService.updateProfile(request));
+    }
+
+    @PostMapping("/me/password")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    public ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
+        userService.changeMyPassword(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/me/sessions")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    public ResponseEntity<List<SessionDTO>> getSessions() {
+        return ResponseEntity.ok(userService.listSessions());
+    }
+
+    @DeleteMapping("/me/sessions")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    public ResponseEntity<Void> closeSessions(@Valid @RequestBody RefreshRequest request) {
+        userService.closeOtherSessions(request.getRefreshToken());
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/{id}")
